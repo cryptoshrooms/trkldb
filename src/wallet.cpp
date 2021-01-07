@@ -1593,7 +1593,7 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
         CBlock block;
 		{
 		    LOCK2(cs_main, cs_wallet);
-			if (!block.ReadFromDisk(txindex.pos.nFile, txindex.pos.nBlockPos, false))
+			if (!block.ReadFromDisk(txindex.pos.blockPos, false))
 				continue;
 		}
 
@@ -1603,7 +1603,7 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
 		unsigned int txNewTime = txNew.nTime;
 			
 		//HyperStake now iterates each utxo inside of CheckStakeKernelHash()
-		if (CheckStakeKernelHash(nBits, block, txindex.pos.nTxPos - txindex.pos.nBlockPos, *pcoin.first, prevoutStake, txNewTime, nHashDrift, false, hashProofOfStake))
+		if (CheckStakeKernelHash(nBits, block, txindex.pos.nTxPos, *pcoin.first, prevoutStake, txNewTime, nHashDrift, false, hashProofOfStake))
 		{
 			// Found a kernel
 			if (fDebug && GetBoolArg("-printcoinstake"))
