@@ -35,8 +35,6 @@ DEBUGFLAGS=-g
 xCXXFLAGS=-O2 -w -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS) $(CXXFLAGS)
 xLDFLAGS=-Wl,--dynamicbase -Wl,--nxcompat -Wl,--large-address-aware -static-libgcc -static-libstdc++ $(LDFLAGS)
 
-TESTDEFS = -DTEST_DATA_DIR=$(abspath test/data)
-
 ifndef USE_UPNP
 	override USE_UPNP = -
 endif
@@ -99,6 +97,14 @@ OBJS= \
 
 all: truckcoind.exe
 
+LIBS += $(CURDIR)/leveldb/out-static/libleveldb.a $(CURDIR)/leveldb/out-static/libmemenv.a -lshlwapi
+DEFS += -I"$(CURDIR)/leveldb/include"
+DEFS += -I"$(CURDIR)/leveldb/helpers"
+OBJS += obj/txdb-leveldb.o
+leveldb/out-static/libleveldb.a:
+	@echo "Building LevelDB ..." && cd leveldb && CC=$(CC) CXX=$(CXX) TARGET_OS=OS_WINDOWS_CROSSCOMPILE CXXFLAGS="-I$(INCLUDEPATHS)" LDFLAGS="-L$(LIBPATHS)" $(MAKE) out-static/libleveldb.a out-static/libmemenv.a && $(RANLIB) out-static/libleveldb.a && $(RANLIB) out-static/libmemenv.a && cd ..
+obj/txdb-leveldb.o: leveldb/out-static/libleveldb.a
+
 obj/build.h: FORCE
 	/bin/sh ../share/genbuild.sh obj/build.h
 version.cpp: obj/build.h
@@ -114,24 +120,12 @@ obj/%.o: %.cpp $(HEADERS)
 truckcoind.exe: $(OBJS:obj/%=obj/%)
 	$(CXX) $(xCXXFLAGS) $(xLDFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS)
 
-TESTOBJS := $(patsubst test/%.cpp,obj-test/%.o,$(wildcard test/*.cpp))
-
-obj-test/%.o: test/%.cpp $(HEADERS)
-	$(CXX) -c $(TESTDEFS) $(xCXXFLAGS) -o $@ $<
-	@cp $(@:%.o=%.d) $(@:%.o=%.P); \
-	  sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' \
-	      -e '/^$$/ d' -e 's/$$/ :/' < $(@:%.o=%.d) >> $(@:%.o=%.P); \
-	  rm -f $(@:%.o=%.d)
-
 obj/%.o: %.c $(HEADERS)
 	$(CXX) -c $(CFLAGS) -fpermissive -MMD -MF $(@:%.o=%.d) -o $@ $<
 	@cp $(@:%.o=%.d) $(@:%.o=%.P); \
 	  sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' \
 	      -e '/^$$/ d' -e 's/$$/ :/' < $(@:%.o=%.d) >> $(@:%.o=%.P); \
 	  rm -f $(@:%.o=%.d)
-
-test_truckcoin.exe: $(TESTOBJS) $(filter-out obj/init.o,$(OBJS:obj/%=obj/%))
-	$(CXX) $(xCXXFLAGS) $(xLDFLAGS) -o $@ $(LIBPATHS) $^ -lboost_unit_test_framework-mt-s $(LIBS)
 
 obj/scrypt-x86.o: scrypt-x86.S
 	$(CXX) -c $(xCXXFLAGS) -MMD -o $@ $<
@@ -142,8 +136,6 @@ obj/scrypt-x86_64.o: scrypt-x86_64.S
 clean:
 	-rm -f obj/*.o
 	-rm -f truckcoind.exe
-	-rm -f obj-test/*.o
-	-rm -f test_truckcoin.exe
 	-rm -f obj/build.h
 	cd leveldb && TARGET_OS=OS_WINDOWS_CROSSCOMPILE $(MAKE) clean && cd ..
 	

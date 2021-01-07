@@ -98,8 +98,13 @@ OBJS= \
 
 all: truckcoind.exe
 
-test check: test_truckcoin.exe FORCE
-	test_truckcoin.exe
+LIBS += $(CURDIR)/leveldb/out-static/libleveldb.a $(CURDIR)/leveldb/out-static/libmemenv.a -lshlwapi
+DEFS += $(addprefix -I,$(CURDIR)/leveldb/include)
+DEFS += $(addprefix -I,$(CURDIR)/leveldb/helpers)
+OBJS += obj/txdb-leveldb.o
+leveldb/out-static/libleveldb.a:
+	cd leveldb; make out-static/libleveldb.a out-static/libmemenv.a; cd ..
+obj/txdb-leveldb.o: leveldb/out-static/libleveldb.a
 
 obj/%.o: %.cpp $(HEADERS)
 	g++ -c $(CFLAGS) -o $@ $<
@@ -116,17 +121,8 @@ obj/scrypt-x86_64.o: scrypt-x86_64.S
 truckcoind.exe: $(OBJS:obj/%=obj/%)
 	g++ $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS)
 
-TESTOBJS := $(patsubst test/%.cpp,obj-test/%.o,$(wildcard test/*.cpp))
-
-obj-test/%.o: test/%.cpp $(HEADERS)
-	g++ -c $(TESTDEFS) $(CFLAGS) -o $@ $<
-
-test_truckcoin.exe: $(TESTOBJS) $(filter-out obj/init.o,$(OBJS:obj/%=obj/%))
-	g++ $(CFLAGS) $(LDFLAGS) -o $@ $(LIBPATHS) $^ -lboost_unit_test_framework $(LIBS)
-
 clean:
-	-del /Q truckcoin test_truckcoin
+	-del /Q truckcoin
 	-del /Q obj\*
-	-del /Q obj-test\*
 
 FORCE:
