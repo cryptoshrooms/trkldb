@@ -3,7 +3,7 @@
 // Copyright (c) 2013-2019 The Truckcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#include "txdb.h"
+#include "db.h"
 #include "walletdb.h"
 #include "bitcoinrpc.h"
 #include "net.h"
@@ -695,14 +695,6 @@ bool AppInit2()
                                  " To recover, BACKUP THAT DIRECTORY, then remove"
                                  " everything from it except for wallet.dat."), strDataDir.c_str());
         return InitError(msg);
-    }
-
-    if (GetBoolArg("-loadblockindextest"))
-    {
-        CTxDB txdb("r");
-        txdb.LoadBlockIndex();
-        PrintBlockTree();
-        return false;
     }
 
     uiInterface.InitMessage(_("Loading block index..."));

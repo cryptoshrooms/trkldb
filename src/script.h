@@ -15,9 +15,10 @@
 #include "keystore.h"
 #include "bignum.h"
 
-typedef std::vector<unsigned char> valtype;
-
+class CCoins;
 class CTransaction;
+
+typedef std::vector<unsigned char> valtype;
 
 /** Signature hash types/flags */
 enum
@@ -553,7 +554,7 @@ public:
         printf("CScript(%s)\n", HexStr(begin(), end(), true).c_str());
     }
 
-    std::string ToString(bool fShort=false) const
+    std::string ToString() const
     {
         std::string str;
         opcodetype opcode;
@@ -569,7 +570,7 @@ public:
                 return str;
             }
             if (0 <= opcode && opcode <= OP_PUSHDATA4)
-                str += fShort? ValueString(vch).substr(0, 10) : ValueString(vch);
+                str += ValueString(vch);
             else
                 str += GetOpName(opcode);
         }
@@ -660,8 +661,10 @@ public:
     }
 };
 
+bool IsCanonicalPubKey(const std::vector<unsigned char> &vchPubKey);
+bool IsCanonicalSignature(const std::vector<unsigned char> &vchSig);
 
-bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, const CTransaction& txTo, unsigned int nIn, int nHashType);
+bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& script, const CTransaction& txTo, unsigned int nIn, bool fStrictEncodings, int nHashType);
 bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::vector<unsigned char> >& vSolutionsRet);
 int ScriptSigArgsExpected(txnouttype t, const std::vector<std::vector<unsigned char> >& vSolutions);
 bool IsStandard(const CScript& scriptPubKey);
@@ -673,8 +676,8 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
 bool SignSignature(const CKeyStore& keystore, const CScript& fromPubKey, CTransaction& txTo, unsigned int nIn, int nHashType=SIGHASH_ALL);
 bool SignSignature(const CKeyStore& keystore, const CTransaction& txFrom, CTransaction& txTo, unsigned int nIn, int nHashType=SIGHASH_ALL);
 bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const CTransaction& txTo, unsigned int nIn,
-                  bool fValidatePayToScriptHash, int nHashType);
-bool VerifySignature(const CTransaction& txFrom, const CTransaction& txTo, unsigned int nIn, bool fValidatePayToScriptHash, int nHashType);
+                  bool fValidatePayToScriptHash, bool fStrictEncodings, int nHashType);
+bool VerifySignature(const CCoins& txFrom, const CTransaction& txTo, unsigned int nIn, bool fValidatePayToScriptHash, bool fStrictEncodings, int nHashType);
 
 // Given two sets of signatures for scriptPubKey, possibly with OP_0 placeholders,
 // combine them intelligently and return the result.

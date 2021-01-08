@@ -105,6 +105,7 @@ OBJS= \
     obj/crypter.o \
     obj/key.o \
     obj/db.o \
+    obj/leveldb.o \
     obj/init.o \
     obj/keystore.o \
     obj/main.o \
@@ -144,10 +145,9 @@ all: truckcoind
 LIBS += $(CURDIR)/leveldb/out-static/libleveldb.a $(CURDIR)/leveldb/out-static/libmemenv.a
 DEFS += $(addprefix -I,$(CURDIR)/leveldb/include)
 DEFS += $(addprefix -I,$(CURDIR)/leveldb/helpers)
-OBJS += obj/txdb-leveldb.o
 leveldb/out-static/libleveldb.a:
 	@echo "Building LevelDB ..."; cd leveldb; make out-static/libleveldb.a out-static/libmemenv.a; cd ..;
-obj/txdb-leveldb.o: leveldb/out-static/libleveldb.a
+obj/leveldb.o: leveldb/out-static/libleveldb.a
 
 # auto-generated dependencies:
 -include obj/*.P
