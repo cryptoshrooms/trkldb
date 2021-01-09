@@ -823,7 +823,6 @@ int CWallet::ScanForWalletTransactions(CBlockIndex* pindexStart, bool fUpdate)
 
 void CWallet::ReacceptWalletTransactions()
 {
-    CCoinsDB coinsdb("r");
     bool fRepeat = true;
     while (fRepeat)
     {
@@ -838,7 +837,7 @@ void CWallet::ReacceptWalletTransactions()
 
             CCoins coins;
             bool fUpdated = false;
-            bool fNotFound = coinsdb.ReadCoins(wtx.GetHash(), coins);
+            bool fNotFound = pcoinsTip->GetCoins(wtx.GetHash(), coins);
             if (!fNotFound || wtx.GetDepthInMainChain() > 0)
             {
                 // Update fSpent if a tx got spent somewhere else by a copy of wallet.dat
@@ -864,7 +863,7 @@ void CWallet::ReacceptWalletTransactions()
             {
                 // Re-accept any txes of ours that aren't already in a block
                 if (!(wtx.IsCoinBase() || wtx.IsCoinStake()))
-                    wtx.AcceptWalletTransaction(coinsdb, false);
+                    wtx.AcceptWalletTransaction(false);
             }
         }
         if (fMissing)
@@ -876,32 +875,27 @@ void CWallet::ReacceptWalletTransactions()
     }
 }
 
-void CWalletTx::RelayWalletTransaction(CCoinsDB& coinsdb)
+void CWalletTx::RelayWalletTransaction()
 {
+    CCoinsViewCache& coins = *pcoinsTip;
     BOOST_FOREACH(const CMerkleTx& tx, vtxPrev)
     {
         if (!(tx.IsCoinBase() || tx.IsCoinStake()))
         {
             uint256 hash = tx.GetHash();
-            if (!coinsdb.HaveCoins(hash))
+            if (!coins.HaveCoins(hash))
                 RelayTransaction((CTransaction)tx, hash);
         }
     }
     if (!(IsCoinBase() || IsCoinStake()))
     {
         uint256 hash = GetHash();
-        if (!coinsdb.HaveCoins(hash))
+        if (!coins.HaveCoins(hash))
         {
             printf("Relaying wtx %s\n", hash.ToString().substr(0,10).c_str());
             RelayTransaction((CTransaction)*this, hash);
         }
     }
-}
-
-void CWalletTx::RelayWalletTransaction()
-{
-   CCoinsDB coinsdb("r");
-   RelayWalletTransaction(coinsdb);
 }
 
 void CWallet::ResendWalletTransactions()
@@ -924,7 +918,6 @@ void CWallet::ResendWalletTransactions()
 
     // Rebroadcast any of our txes that aren't in a block yet
     printf("ResendWalletTransactions()\n");
-    CCoinsDB coinsdb("r");
     {
         LOCK(cs_wallet);
         // Sort them in chronological order
@@ -940,7 +933,7 @@ void CWallet::ResendWalletTransactions()
         BOOST_FOREACH(PAIRTYPE(const unsigned int, CWalletTx*)& item, mapSorted)
         {
             CWalletTx& wtx = *item.second;
-            wtx.RelayWalletTransaction(coinsdb);
+            wtx.RelayWalletTransaction();
         }
     }
 }
@@ -1419,8 +1412,7 @@ bool CWallet::GetStakeWeight(const CKeyStore& keystore, uint64& nMinWeight, uint
     if (setCoins.empty())
         return false;
 
-    CCoinsDB coinsdb("r");
-    CCoinsViewDB view(coinsdb);
+    CCoinsViewCache &view = *pcoinsTip;
     BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
     {
         CCoins coins;
@@ -1477,8 +1469,7 @@ bool CWallet::GetStakeWeight2(const CKeyStore& keystore, uint64& nMinWeight, uin
     if (setCoins.empty())
         return false;
 
-    CCoinsDB coinsdb("r");
-    CCoinsViewDB view(coinsdb);
+    CCoinsViewCache &view = *pcoinsTip;
     BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
     {
         CCoins coins;
@@ -1549,8 +1540,7 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
     int64 nCredit = 0;
     CScript scriptPubKeyKernel;
     
-    CCoinsDB coinsdb("r");
-    CCoinsViewDB view(coinsdb);
+    CCoinsViewCache &view = *pcoinsTip;
     
     BOOST_FOREACH(PAIRTYPE(const CWalletTx*, unsigned int) pcoin, setCoins)
     {
@@ -1676,11 +1666,9 @@ bool CWallet::CreateCoinStake(const CKeyStore& keystore, unsigned int nBits, int
     // Calculate coin age reward
     {
         uint64 nCoinAge;
-        CCoinsDB coindb("r");
-        CCoinsViewDB view(coindb);
 		const CBlockIndex* pIndex0 = GetLastBlockIndex(pindexBest, false);
-
-        if (!txNew.GetCoinAge(view, nCoinAge))
+        
+        if (!txNew.GetCoinAge(nCoinAge))
             return error("CreateCoinStake : failed to calculate coin age");
         nCredit += GetProofOfStakeReward(nCoinAge, nBits, txNew.nTime, pIndex0->nHeight, false);
     }
@@ -2229,7 +2217,7 @@ void CWallet::FixSpentCoins(int& nMismatchFound, int64& nBalanceInQuestion, int&
     for (map<uint256, CWalletTx>::iterator it = mapWallet.begin(); it != mapWallet.end(); ++it)
         vCoins.push_back(&(*it).second);
 
-    CCoinsDB coinsdb("r");
+    CCoinsViewCache &view = *pcoinsTip;
     BOOST_FOREACH(CWalletTx* pcoin, vCoins)
     {
 	    uint256 hash = pcoin->GetHash();
@@ -2252,7 +2240,7 @@ void CWallet::FixSpentCoins(int& nMismatchFound, int64& nBalanceInQuestion, int&
         // Find the corresponding transaction index
         CCoins coins;
 
-        bool fNotFound = coinsdb.ReadCoins(pcoin->GetHash(), coins);
+        bool fNotFound = view.GetCoins(pcoin->GetHash(), coins);
 
         for (unsigned int n=0; n < pcoin->vout.size(); n++)
         {
