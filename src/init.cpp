@@ -837,6 +837,10 @@ bool AppInit2()
     }
 
     // ********************************************************* Step 9: import blocks
+    
+    uiInterface.InitMessage(_("Importing blocks from block database..."));
+    if (!ConnectBestBlock())
+        strErrors << "Failed to connect best block";
 
     if (mapArgs.count("-loadblock"))
     {
