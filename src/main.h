@@ -128,6 +128,7 @@ extern unsigned char pchMessageStart[4];
 extern std::map<uint256, CBlock*> mapOrphanBlocks;
 extern std::map<unsigned int, unsigned int> mapHashedBlocks;
 extern unsigned int nCoinCacheSize;
+extern bool fImporting;
 
 // Settings
 extern int64 nTransactionFee;
@@ -152,12 +153,13 @@ bool ProcessBlock(CNode* pfrom, CBlock* pblock, std::string& strErr);
 bool CheckDiskSpace(uint64 nAdditionalBytes=0);
 FILE* OpenBlockFile(const CDiskBlockPos &pos, bool fReadOnly = false);
 FILE* OpenUndoFile(const CDiskBlockPos &pos, bool fReadOnly = false);
+bool LoadExternalBlockFile(FILE* fileIn);
 bool LoadBlockIndex(bool fAllowNew=true);
 void PrintBlockTree();
 CBlockIndex* FindBlockByHeight(int nHeight);
 bool ProcessMessages(CNode* pfrom);
 bool SendMessages(CNode* pto, bool fSendTrickle);
-bool LoadExternalBlockFile(FILE* fileIn);
+void ThreadImport(void *parg);
 void GenerateBitcoins(bool fGenerate, CWallet* pwallet);
 unsigned int GetNextTargetRequired(const CBlockIndex* pindexLast, bool fProofOfStake);
 bool CheckProofOfWork(uint256 hash, unsigned int nBits);
