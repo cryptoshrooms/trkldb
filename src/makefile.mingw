@@ -64,6 +64,7 @@ OBJS= \
     obj/key.o \
     obj/db.o \
     obj/leveldb.o \
+    obj/txdb.o \
     obj/init.o \
     obj/keystore.o \
     obj/main.o \

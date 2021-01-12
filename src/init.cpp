@@ -3,7 +3,7 @@
 // Copyright (c) 2013-2019 The Truckcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
-#include "db.h"
+#include "txdb.h"
 #include "walletdb.h"
 #include "bitcoinrpc.h"
 #include "net.h"
@@ -709,7 +709,7 @@ bool AppInit2()
     uiInterface.InitMessage(_("Loading block index..."));
     printf("Loading block index...\n");
     nStart = GetTimeMillis();
-    pblocktree = new CBlockTreeDB("cr+");
+    pblocktree = new CBlockTreeDB();
     pcoinsdbview = new CCoinsViewDB();
     pcoinsTip = new CCoinsViewCache(*pcoinsdbview);
 
