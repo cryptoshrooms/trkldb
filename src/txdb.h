@@ -14,7 +14,7 @@ class CCoinsViewDB : public CCoinsView
 protected:
     CLevelDB db;
 public:
-    CCoinsViewDB(int64_t nCacheSize, bool fMemory = false);
+    CCoinsViewDB(int64_t nCacheSize, bool fMemory = false, bool fWipe = false);
 
     bool GetCoins(uint256 txid, CCoins &coins);
     bool SetCoins(uint256 txid, const CCoins &coins);
@@ -29,7 +29,7 @@ public:
 class CBlockTreeDB : public CLevelDB
 {
 public:
-    CBlockTreeDB(int64_t nCacheSize, bool fMemory = false);
+    CBlockTreeDB(int64_t nCacheSize, bool fMemory = false, bool fWipe = false);
 private:
     CBlockTreeDB(const CBlockTreeDB&);
     void operator=(const CBlockTreeDB&);
@@ -41,6 +41,8 @@ public:
     bool WriteBlockFileInfo(int nFile, const CBlockFileInfo &fileinfo);
     bool ReadLastBlockFile(int &nFile);
     bool WriteLastBlockFile(int nFile);
+    bool WriteReindexing(bool fReindex);
+    bool ReadReindexing(bool &fReindex);
     bool ReadSyncCheckpoint(uint256& hashCheckpoint);
     bool WriteSyncCheckpoint(uint256 hashCheckpoint);
     bool ReadCheckpointPubKey(std::string& strPubKey);

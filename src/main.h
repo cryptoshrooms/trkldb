@@ -127,8 +127,9 @@ extern std::set<CWallet*> setpwalletRegistered;
 extern unsigned char pchMessageStart[4];
 extern std::map<uint256, CBlock*> mapOrphanBlocks;
 extern std::map<unsigned int, unsigned int> mapHashedBlocks;
-extern unsigned int nCoinCacheSize;
 extern bool fImporting;
+extern bool fReindex;
+extern unsigned int nCoinCacheSize;
 
 // Settings
 extern int64 nTransactionFee;
@@ -148,13 +149,12 @@ class CCoinsView;
 void RegisterWallet(CWallet* pwalletIn);
 void UnregisterWallet(CWallet* pwalletIn);
 void SyncWithWallets(const CTransaction& tx, const CBlock* pblock = NULL, bool fUpdate = false, bool fConnect = true);
-bool ProcessBlock(CNode* pfrom, CBlock* pblock);
-bool ProcessBlock(CNode* pfrom, CBlock* pblock, std::string& strErr);
+bool ProcessBlock(CNode* pfrom, CBlock* pblock, CDiskBlockPos *dbp = NULL);
 bool CheckDiskSpace(uint64 nAdditionalBytes=0);
 FILE* OpenBlockFile(const CDiskBlockPos &pos, bool fReadOnly = false);
 FILE* OpenUndoFile(const CDiskBlockPos &pos, bool fReadOnly = false);
-bool LoadExternalBlockFile(FILE* fileIn);
-bool LoadBlockIndex(bool fAllowNew=true);
+bool LoadExternalBlockFile(FILE* fileIn, CDiskBlockPos *dbp = NULL);
+bool LoadBlockIndex();
 void PrintBlockTree();
 CBlockIndex* FindBlockByHeight(int nHeight);
 bool ProcessMessages(CNode* pfrom);
@@ -1390,7 +1390,6 @@ public:
         printf("\n");
     }
     
-
     // Undo the effects of this block (with given index) on the UTXO set represented by coins
     bool DisconnectBlock(CBlockIndex *pindex, CCoinsView &coins);
     // Apply the effects of this block (with given index) on the UTXO set represented by coins
@@ -1402,7 +1401,8 @@ public:
     // Context-independent validity checks
     bool CheckBlock(bool fCheckPOW=true, bool fCheckMerkleRoot=true, bool fCheckSig=false) const;
     // Store block on disk
-    bool AcceptBlock();
+    // if dbp is provided, the file is known to already reside on disk
+    bool AcceptBlock(CDiskBlockPos *dbp = NULL);
     // Get total coinage consumed
     bool GetCoinAge(uint64& nCoinAge) const;
     // Generate proof-of-stake block signature
