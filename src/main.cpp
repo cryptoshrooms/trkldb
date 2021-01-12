@@ -669,7 +669,13 @@ bool CTxMemPool::accept(CTransaction &tx, bool fCheckInputs, bool* pfMissingInpu
 
     if (fCheckInputs)
     {
-        CCoinsViewCache &view = *pcoinsTip;
+        CCoinsView dummy;
+        CCoinsViewCache view(dummy);
+
+        {
+        LOCK(cs);
+        CCoinsViewMemPool viewMemPool(*pcoinsTip, *this);
+        view.SetBackend(viewMemPool);
 
         // Do we already have it?
         if (view.HaveCoins(hash))
@@ -677,12 +683,25 @@ bool CTxMemPool::accept(CTransaction &tx, bool fCheckInputs, bool* pfMissingInpu
         
 
         // Do all inputs exist?
+        // Note that this does not check for the presence of actual outputs (see the next check for that),
+        // only helps filling in pfMissingInputs (to determine missing vs spent).
         BOOST_FOREACH(const CTxIn txin, tx.vin) {
             if (!view.HaveCoins(txin.prevout.hash)) {
                 if (pfMissingInputs)
                     *pfMissingInputs = true;
                 return false;
             }
+        }
+        
+        // are the actual inputs available?
+        if (!tx.HaveInputs(view))
+            return error("CTxMemPool::accept() : inputs already spent");
+
+        // Bring the best block into scope
+        view.GetBestBlock();
+
+        // we have all inputs cached now, so switch back to dummy, so we don't need to keep lock on mempool
+        view.SetBackend(dummy);
         }
 
         // Check for non-standard pay-to-script-hash in inputs
@@ -714,7 +733,6 @@ bool CTxMemPool::accept(CTransaction &tx, bool fCheckInputs, bool* pfMissingInpu
             int64 nNow = GetTime();
 
             {
-                LOCK(cs);
                 // Use an exponentially decaying ~10-minute window:
                 dFreeCount *= pow(1.0 - 1.0/600.0, (double)(nNow - nLastTime));
                 nLastTime = nNow;
@@ -1520,14 +1538,8 @@ bool CTransaction::CheckInputs(CCoinsView &inputs, enum CheckSig_mode csmode, bo
                 inputs.GetCoins(prevout.hash, coins);
 
                 // Verify signature
-                if (!VerifySignature(coins, *this, i, fStrictPayToScriptHash, fStrictEncodings, 0)) {
-                    // only during transition phase for P2SH: do not invoke anti-DoS code for
-                    // potentially old clients relaying bad P2SH transactions
-                    if (fStrictPayToScriptHash && VerifySignature(coins, *this, i, false, fStrictEncodings, 0))
-                        return error("CheckInputs() : %s P2SH VerifySignature failed", GetHash().ToString().substr(0,10).c_str());
-
+                if (!VerifySignature(coins, *this, i, fStrictPayToScriptHash, fStrictEncodings, 0))
                     return DoS(100,error("CheckInputs() : %s VerifySignature failed", GetHash().ToString().substr(0,10).c_str()));
-                }
             }
         }
         
