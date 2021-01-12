@@ -705,12 +705,24 @@ bool AppInit2()
                                  " everything from it except for wallet.dat."), strDataDir.c_str());
         return InitError(msg);
     }
+    
+    // cache size calculations
+    int64_t nTotalCache = GetArg("-dbcache", 25) << 20;
+    if (nTotalCache < (1 << 22))
+        nTotalCache = (1 << 22); // total cache cannot be less than 4 MiB
+    int64_t nBlockTreeDBCache = nTotalCache / 8;
+    if (nBlockTreeDBCache > (1 << 21))
+        nBlockTreeDBCache = (1 << 21); // block tree db cache shouldn't be larger than 2 MiB
+    nTotalCache -= nBlockTreeDBCache;
+    int64_t nCoinDBCache = nTotalCache / 2; // use half of the remaining cache for coindb cache
+    nTotalCache -= nCoinDBCache;
+    nCoinCacheSize = nTotalCache / 300; // coins in memory require around 300 bytes
 
     uiInterface.InitMessage(_("Loading block index..."));
     printf("Loading block index...\n");
     nStart = GetTimeMillis();
-    pblocktree = new CBlockTreeDB();
-    pcoinsdbview = new CCoinsViewDB();
+    pblocktree = new CBlockTreeDB(nBlockTreeDBCache);
+    pcoinsdbview = new CCoinsViewDB(nCoinDBCache);
     pcoinsTip = new CCoinsViewCache(*pcoinsdbview);
 
     if (!LoadBlockIndex())

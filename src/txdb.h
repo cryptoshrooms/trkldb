@@ -14,7 +14,7 @@ class CCoinsViewDB : public CCoinsView
 protected:
     CLevelDB db;
 public:
-    CCoinsViewDB(bool fMemory = false);
+    CCoinsViewDB(int64_t nCacheSize, bool fMemory = false);
 
     bool GetCoins(uint256 txid, CCoins &coins);
     bool SetCoins(uint256 txid, const CCoins &coins);
@@ -29,7 +29,7 @@ public:
 class CBlockTreeDB : public CLevelDB
 {
 public:
-    CBlockTreeDB(bool fMemory = false);
+    CBlockTreeDB(int64_t nCacheSize, bool fMemory = false);
 private:
     CBlockTreeDB(const CBlockTreeDB&);
     void operator=(const CBlockTreeDB&);
