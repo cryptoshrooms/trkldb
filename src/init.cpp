@@ -84,6 +84,7 @@ void Shutdown(void* parg)
         {
             LOCK(cs_main);
             pcoinsTip->Flush();
+            pblocktree->Flush();
             delete pcoinsTip;
             delete pcoinsdbview;
         }
@@ -708,6 +709,7 @@ bool AppInit2()
     uiInterface.InitMessage(_("Loading block index..."));
     printf("Loading block index...\n");
     nStart = GetTimeMillis();
+    pblocktree = new CBlockTreeDB("cr+");
     pcoinsdbview = new CCoinsViewDB();
     pcoinsTip = new CCoinsViewCache(*pcoinsdbview);
 
