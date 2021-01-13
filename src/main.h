@@ -129,6 +129,7 @@ extern std::map<uint256, CBlock*> mapOrphanBlocks;
 extern std::map<unsigned int, unsigned int> mapHashedBlocks;
 extern bool fImporting;
 extern bool fReindex;
+extern bool fTxIndex;
 extern unsigned int nCoinCacheSize;
 
 // Settings
@@ -184,9 +185,8 @@ void ResendWalletTransactions();
 
 bool GetWalletFile(CWallet* pwallet, std::string &strWalletFileOut);
 
-class CDiskBlockPos
+struct CDiskBlockPos
 {
-public:
     int nFile;
     unsigned int nPos;
 
@@ -194,6 +194,15 @@ public:
         READWRITE(VARINT(nFile));
         READWRITE(VARINT(nPos));
     )
+
+    CDiskBlockPos() {
+        SetNull();
+    }
+
+    CDiskBlockPos(int nFileIn, unsigned int nPosIn) {
+        nFile = nFileIn;
+        nPos = nPosIn;
+    }
 
     friend bool operator==(const CDiskBlockPos &a, const CDiskBlockPos &b) {
         return (a.nFile == b.nFile && a.nPos == b.nPos);
@@ -205,6 +214,28 @@ public:
 
     void SetNull() { nFile = -1; nPos = 0; }
     bool IsNull() const { return (nFile == -1); }
+};
+
+struct CDiskTxPos : public CDiskBlockPos
+{
+    unsigned int nTxOffset; // after header
+
+    IMPLEMENT_SERIALIZE(
+        READWRITE(*(CDiskBlockPos*)this);
+        READWRITE(VARINT(nTxOffset));
+    )
+
+    CDiskTxPos(const CDiskBlockPos &blockIn, unsigned int nTxOffsetIn) : CDiskBlockPos(blockIn.nFile, blockIn.nPos), nTxOffset(nTxOffsetIn) {
+    }
+
+    CDiskTxPos() {
+        SetNull();
+    }
+    
+    void SetNull() {
+        CDiskBlockPos::SetNull();
+        nTxOffset = 0;
+    }
 };
 
 /** An inpoint - a combination of a transaction and an index n into its vin */
