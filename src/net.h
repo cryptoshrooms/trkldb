@@ -109,7 +109,6 @@ enum threadId
     THREAD_MAX
 };
 
-extern bool fClient;
 extern bool fDiscover;
 extern bool fListen;
 extern bool fUseUPnP;
