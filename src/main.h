@@ -1146,7 +1146,7 @@ public:
  * in the block is a special one that creates a new coin owned by the creator
  * of the block.
  */
-class CBlock
+class CBlockHeader
 {
 public:
     // header
@@ -1158,20 +1158,7 @@ public:
     unsigned int nBits;
     unsigned int nNonce;
 
-    // network and disk
-    std::vector<CTransaction> vtx;
-
-    // block signature - signed by one of the coin base txout[N]'s owner
-    std::vector<unsigned char> vchBlockSig;
-
-    // memory only
-    mutable std::vector<uint256> vMerkleTree;
-
-    // Denial-of-service detection:
-    mutable int nDoS;
-    bool DoS(int nDoSIn, bool fIn) const { nDoS += nDoSIn; return fIn; }
-
-    CBlock()
+    CBlockHeader()
     {
         SetNull();
     }
@@ -1185,32 +1172,16 @@ public:
         READWRITE(nTime);
         READWRITE(nBits);
         READWRITE(nNonce);
-
-        // ConnectBlock depends on vtx following header to generate CDiskTxPos
-        if (!(nType & (SER_GETHASH|SER_BLOCKHEADERONLY)))
-        {
-            READWRITE(vtx);
-            READWRITE(vchBlockSig);
-        }
-        else if (fRead)
-        {
-            const_cast<CBlock*>(this)->vtx.clear();
-            const_cast<CBlock*>(this)->vchBlockSig.clear();
-        }
     )
 
     void SetNull()
     {
-        nVersion = CBlock::CURRENT_VERSION;
+        nVersion = CBlockHeader::CURRENT_VERSION;
         hashPrevBlock = 0;
         hashMerkleRoot = 0;
         nTime = 0;
         nBits = 0;
         nNonce = 0;
-        vtx.clear();
-        vchBlockSig.clear();
-        vMerkleTree.clear();
-        nDoS = 0;
     }
 
     bool IsNull() const
@@ -1229,16 +1200,53 @@ public:
     }
 
     void UpdateTime(const CBlockIndex* pindexPrev);
+    
+};
 
-    // entropy bit for stake modifier if chosen by modifier
-    unsigned int GetStakeEntropyBit(unsigned int nHeight) const
+class CBlock : public CBlockHeader
+{
+public:
+    // network and disk
+    std::vector<CTransaction> vtx;
+
+    // block signature - signed by one of the coin base txout[N]'s owner
+    std::vector<unsigned char> vchBlockSig;
+
+    // memory only
+    mutable std::vector<uint256> vMerkleTree;
+    
+    // Denial-of-service detection:
+    mutable int nDoS;
+    bool DoS(int nDoSIn, bool fIn) const { nDoS += nDoSIn; return fIn; }
+
+    CBlock()
     {
-        // Take last bit of block hash as entropy bit
-        unsigned int nEntropyBit = ((GetHash().Get64()) & 1llu);
-        if (fDebug && GetBoolArg("-printstakemodifier"))
-            printf("GetStakeEntropyBit: nHeight=%u hashBlock=%s nEntropyBit=%u\n", nHeight, GetHash().ToString().c_str(), nEntropyBit);
-        return nEntropyBit;
+        SetNull();
     }
+
+    CBlock(const CBlockHeader &header)
+    {
+        SetNull();
+        *((CBlockHeader*)this) = header;
+    }
+
+    IMPLEMENT_SERIALIZE
+    (
+        READWRITE(*(CBlockHeader*)this);
+        READWRITE(vtx);
+        READWRITE(vchBlockSig);
+    )
+
+    void SetNull()
+    {
+        CBlockHeader::SetNull();
+        vtx.clear();
+        vchBlockSig.clear();
+        vMerkleTree.clear();
+        nDoS = 0;
+    }
+
+
 
     // two types of block: proof-of-work or proof-of-stake
     bool IsProofOfStake() const
@@ -1263,6 +1271,18 @@ public:
         BOOST_FOREACH(const CTransaction& tx, vtx)
             maxTransactionTime = std::max(maxTransactionTime, (int64)tx.nTime);
         return maxTransactionTime;
+    }
+
+    CBlockHeader GetBlockHeader() const
+    {
+        CBlockHeader block;
+        block.nVersion       = nVersion;
+        block.hashPrevBlock  = hashPrevBlock;
+        block.hashMerkleRoot = hashMerkleRoot;
+        block.nTime          = nTime;
+        block.nBits          = nBits;
+        block.nNonce         = nNonce;
+        return block;
     }
 
     uint256 BuildMerkleTree() const
@@ -1341,7 +1361,7 @@ public:
         return true;
     }
 
-    bool ReadFromDisk(const CDiskBlockPos &pos, bool fReadTransactions = true)
+    bool ReadFromDisk(const CDiskBlockPos &pos)
     {
         SetNull();
 
@@ -1349,8 +1369,6 @@ public:
         CAutoFile filein = CAutoFile(OpenBlockFile(pos, true), SER_DISK, CLIENT_VERSION);
         if (!filein)
             return error("CBlock::ReadFromDisk() : OpenBlockFile failed");
-        if (!fReadTransactions)
-            filein.nType |= SER_BLOCKHEADERONLY;
 
         // Read block
         try {
@@ -1361,7 +1379,7 @@ public:
         }
 
         // Check the header
-        if (fReadTransactions && IsProofOfWork() && !CheckProofOfWork(GetHash(), nBits))
+        if (IsProofOfWork() && !CheckProofOfWork(GetHash(), nBits))
             return error("CBlock::ReadFromDisk() : errors in block header");
 
         return true;
@@ -1395,7 +1413,7 @@ public:
     // Apply the effects of this block (with given index) on the UTXO set represented by coins
     bool ConnectBlock(CBlockIndex *pindex, CCoinsView &coins, bool fJustCheck=false);
     // Read a block from disk
-    bool ReadFromDisk(const CBlockIndex* pindex, bool fReadTransactions=true);
+    bool ReadFromDisk(const CBlockIndex* pindex);
     // Add this block to the block index, and if necessary, switch the active block chain to this
     bool AddToBlockIndex(const CDiskBlockPos &pos);
     // Context-independent validity checks
@@ -1409,6 +1427,15 @@ public:
     bool SignBlock(const CKeyStore& keystore);
     // Validate header signature
     bool CheckBlockSignature(bool fProofOfStake) const;
+    // entropy bit for stake modifier if chosen by modifier
+    unsigned int GetStakeEntropyBit(unsigned int nHeight) const
+    {
+        // Take last bit of block hash as entropy bit
+        unsigned int nEntropyBit = ((GetHash().Get64()) & 1llu);
+        if (fDebug && GetBoolArg("-printstakemodifier"))
+            printf("GetStakeEntropyBit: nHeight=%u hashBlock=%s nEntropyBit=%u\n", nHeight, GetHash().ToString().c_str(), nEntropyBit);
+        return nEntropyBit;
+    }
 };
 
 class CBlockFileInfo
@@ -1563,9 +1590,6 @@ public:
         nDataPos = 0;
         nUndoPos = 0;
         bnChainTrust = 0;
-        nTx = 0;
-        nChainTx = 0;
-        nStatus = 0;
         nMint = 0;
         nMoneySupply = 0;
         nFlags = 0;
@@ -1574,6 +1598,9 @@ public:
         hashProofOfStake = 0;
         prevoutStake.SetNull();
         nStakeTime = 0;
+        nTx = 0;
+        nChainTx = 0;
+        nStatus = 0;
 
         nVersion       = 0;
         hashMerkleRoot = 0;
@@ -1592,9 +1619,6 @@ public:
         nDataPos = 0;
         nUndoPos = 0;
         bnChainTrust = 0;
-        nTx = 0;
-        nChainTx = 0;
-        nStatus = 0;
         nMint = 0;
         nMoneySupply = 0;
         nFlags = 0;
@@ -1612,6 +1636,9 @@ public:
             prevoutStake.SetNull();
             nStakeTime = 0;
         }
+        nTx = 0;
+        nChainTx = 0;
+        nStatus = 0;
        
         nVersion       = block.nVersion;
         hashMerkleRoot = block.hashMerkleRoot;
@@ -1640,9 +1667,9 @@ public:
         return ret;
     }
 
-    CBlock GetBlockHeader() const
+    CBlockHeader GetBlockHeader() const
     {
-        CBlock block;
+        CBlockHeader block;
         block.nVersion       = nVersion;
         if (pprev)
             block.hashPrevBlock = pprev->GetBlockHash();
@@ -1847,7 +1874,7 @@ public:
         if ((nTime < GetAdjustedTime() - 24 * 60 * 60) && blockHash != 0)
             return blockHash;
 
-        CBlock block;
+        CBlockHeader block;
         block.nVersion        = nVersion;
         block.hashPrevBlock   = hashPrev;
         block.hashMerkleRoot  = hashMerkleRoot;
