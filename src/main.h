@@ -1689,8 +1689,7 @@ public:
         if (nStatus & BLOCK_HAVE_DATA) {
             ret.nFile = nFile;
             ret.nPos  = nDataPos;
-        } else
-            ret.SetNull();
+        }
         return ret;
     }
 
@@ -1699,8 +1698,7 @@ public:
         if (nStatus & BLOCK_HAVE_UNDO) {
             ret.nFile = nFile;
             ret.nPos  = nUndoPos;
-        } else
-            ret.SetNull();
+        }
         return ret;
     }
 

@@ -58,7 +58,7 @@ CBlockIndex* pindexBest = NULL;
 int64 nTimeBestReceived = 0;
 bool fImporting = false;
 bool fReindex = false;
-bool fTxIndex = false;
+bool fTxIndex = true;
 set<CBlockIndex*, CBlockIndexTrustComparator> setBlockIndexValid; // may contain all CBlockIndex*'s that have validness >=BLOCK_VALID_TRANSACTIONS, and must contain those who aren't failed
 unsigned int nCoinCacheSize = 5000;
 
@@ -1675,9 +1675,7 @@ void static FlushBlockFile()
 {
     LOCK(cs_LastBlockFile);
 
-    CDiskBlockPos posOld;
-    posOld.nFile = nLastBlockFile;
-    posOld.nPos = 0;
+    CDiskBlockPos posOld(nLastBlockFile, 0);
 
     FILE *fileOld = OpenBlockFile(posOld);
     FileCommit(fileOld);
@@ -2760,14 +2758,14 @@ bool static LoadBlockIndexDB()
     {
         CBlockIndex* pindex = item.second;
         pindex->bnChainTrust = (pindex->pprev ? pindex->pprev->bnChainTrust : 0) + pindex->GetBlockTrust();
-         // Calculate stake modifier checksum
-        pindex->nStakeModifierChecksum = GetStakeModifierChecksum(pindex);
-        if (!CheckStakeModifierCheckpoints(pindex->nHeight, pindex->nStakeModifierChecksum))
-            return error("LoadBlockIndexDB() : Failed stake modifier checkpoint height=%d, modifier=0x%016" PRI64x , pindex->nHeight, pindex->nStakeModifier);
-        
         pindex->nChainTx = (pindex->pprev ? pindex->pprev->nChainTx : 0) + pindex->nTx;
         if ((pindex->nStatus & BLOCK_VALID_MASK) >= BLOCK_VALID_TRANSACTIONS && !(pindex->nStatus & BLOCK_FAILED_MASK))
             setBlockIndexValid.insert(pindex);
+
+        // Calculate stake modifier checksum
+        pindex->nStakeModifierChecksum = GetStakeModifierChecksum(pindex);
+        if (!CheckStakeModifierCheckpoints(pindex->nHeight, pindex->nStakeModifierChecksum))
+            return error("LoadBlockIndexDB() : Failed stake modifier checkpoint height=%d, modifier=0x%016" PRI64x , pindex->nHeight, pindex->nStakeModifier);
     }
 
     // Load block file info
@@ -2775,25 +2773,6 @@ bool static LoadBlockIndexDB()
     printf("LoadBlockIndexDB(): last block file = %i\n", nLastBlockFile);
     if (pblocktree->ReadBlockFileInfo(nLastBlockFile, infoLastBlockFile))
         printf("LoadBlockIndexDB(): last block file: %s\n", infoLastBlockFile.ToString().c_str());
-    
-    // Load sync-checkpoint
-    if (!pblocktree->ReadSyncCheckpoint(Checkpoints::hashSyncCheckpoint))
-        return error("LoadBlockIndexDB() : hashSyncCheckpoint not loaded");
-    printf("LoadBlockIndexDB(): synchronized checkpoint %s\n", Checkpoints::hashSyncCheckpoint.ToString().c_str());
-    
-    // Load bnBestInvalidTrust, OK if it doesn't exist
-    CBigNum bnBestInvalidTrust;
-    pblocktree->ReadBestInvalidTrust(bnBestInvalidTrust);
-//    nBestInvalidTrust = bnBestInvalidTrust.getuint256();
-    
-    // Check whether we need to continue reindexing
-    bool fReindexing = false;
-    pblocktree->ReadReindexing(fReindexing);
-    fReindex |= fReindexing;
-    
-    // Check whether we have a transaction index
-    pblocktree->ReadFlag("txindex", fTxIndex);
-    printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
 
     // Load hashBestChain pointer to end of best chain
     pindexBest = pcoinsTip->GetBestBlock();
@@ -2817,7 +2796,26 @@ bool static LoadBlockIndexDB()
     printf("LoadBlockIndexDB(): hashBestChain=%s  height=%d date=%s\n",
         hashBestChain.ToString().substr(0,20).c_str(), nBestHeight,
         DateTimeStrFormat("%x %H:%M:%S", pindexBest->GetBlockTime()).c_str());
- 
+
+    // Load sync-checkpoint
+    if (!pblocktree->ReadSyncCheckpoint(Checkpoints::hashSyncCheckpoint))
+        return error("LoadBlockIndexDB() : hashSyncCheckpoint not loaded");
+    printf("LoadBlockIndexDB(): synchronized checkpoint %s\n", Checkpoints::hashSyncCheckpoint.ToString().c_str());
+
+    // Load bnBestInvalidTrust, OK if it doesn't exist
+    CBigNum bnBestInvalidTrust;
+    pblocktree->ReadBestInvalidTrust(bnBestInvalidTrust);
+//    nBestInvalidTrust = bnBestInvalidTrust.getuint256();
+    
+    // Check whether we need to continue reindexing
+    bool fReindexing = false;
+    pblocktree->ReadReindexing(fReindexing);
+    fReindex |= fReindexing;
+    
+    // Check whether we have a transaction index
+    pblocktree->ReadFlag("txindex", fTxIndex);
+    printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
+
     // Verify blocks in the best chain
     int nCheckLevel = GetArg("-checklevel", 1);
     int nCheckDepth = GetArg( "-checkblocks", 2500);
@@ -2868,7 +2866,7 @@ bool LoadBlockIndex()
         nCoinbaseMaturity = 10; // test maturity is 10 blocks
         nStakeTargetSpacing = 30; // test block spacing is 3 minutes
     }
-    
+
     //
     // Load block index from databases
     //
