@@ -321,7 +321,7 @@ CBlock* CreateNewBlock(CWallet* pwallet, bool fProofOfStake)
                 std::make_heap(vecPriority.begin(), vecPriority.end(), comparer);
             }
 
-            if (!tx.CheckInputs(viewTemp, CS_ALWAYS, true, false))
+            if (!tx.HaveInputs(viewTemp))
                 continue;
 
             int64 nTxFees = tx.GetValueIn(viewTemp)-tx.GetValueOut();
@@ -330,6 +330,9 @@ CBlock* CreateNewBlock(CWallet* pwallet, bool fProofOfStake)
 
             nTxSigOps += tx.GetP2SHSigOpCount(viewTemp);
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS)
+                continue;
+            
+            if (!tx.CheckInputs(viewTemp, CS_ALWAYS, true, false))
                 continue;
             
 /*

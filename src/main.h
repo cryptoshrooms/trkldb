@@ -146,6 +146,7 @@ class CDiskBlockPos;
 class CCoins;
 class CTxUndo;
 class CCoinsView;
+class CCoinsViewCache;
 
 void RegisterWallet(CWallet* pwalletIn);
 void UnregisterWallet(CWallet* pwalletIn);
@@ -593,7 +594,7 @@ public:
         @return True if all inputs (scriptSigs) use only standard transaction forms
         @see CTransaction::FetchInputs
     */
-    bool AreInputsStandard(CCoinsView& mapInputs) const;
+    bool AreInputsStandard(CCoinsViewCache& mapInputs) const;
 
     /** Count ECDSA signature operations the old-fashioned (pre-0.6) way
         @return number of sigops this transaction's outputs will produce when spent
@@ -607,7 +608,7 @@ public:
         @return maximum number of sigops required to validate this transaction's inputs
         @see CTransaction::FetchInputs
      */
-    unsigned int GetP2SHSigOpCount(CCoinsView& mapInputs) const;
+    unsigned int GetP2SHSigOpCount(CCoinsViewCache& mapInputs) const;
 
     /** Amount of coins spent by this transaction.
         @return sum of all outputs (note: does not include fees)
@@ -632,7 +633,7 @@ public:
         @return	Sum of value of all inputs (scriptSigs)
         @see CTransaction::FetchInputs
      */
-    int64 GetValueIn(CCoinsView& mapInputs) const;
+    int64 GetValueIn(CCoinsViewCache& mapInputs) const;
 
     static bool AllowFree(double dPriority)
     {
@@ -693,14 +694,14 @@ public:
     bool ClientCheckInputs() const;
 
     // Check whether all prevouts of this transaction are present in the UTXO set represented by view
-    bool HaveInputs(CCoinsView &view) const;
+    bool HaveInputs(CCoinsViewCache &view) const;
 
     // Check whether all inputs of this transaction are valid (no double spends, scripts & sigs, amounts)
     // This does not modify the UTXO set
-    bool CheckInputs(CCoinsView &view, enum CheckSig_mode csmode, bool fStrictPayToScriptHash=true, bool fStrictEncodings=true, CBlock *pblock=NULL) const;
+    bool CheckInputs(CCoinsViewCache &view, enum CheckSig_mode csmode, bool fStrictPayToScriptHash=true, bool fStrictEncodings=true, CBlock *pblock=NULL) const;
 
     // Apply the effects of this transaction on the UTXO set represented by view
-    bool UpdateCoins(CCoinsView &view, CTxUndo &txundo, int nHeight, unsigned int nBlockTime, const uint256 &txhash) const;
+    bool UpdateCoins(CCoinsViewCache &view, CTxUndo &txundo, int nHeight, unsigned int nBlockTime, const uint256 &txhash) const;
 
     // Context-independent validity checks
     bool CheckTransaction() const;
@@ -709,7 +710,7 @@ public:
     bool AcceptToMemoryPool(bool fCheckInputs=true, bool* pfMissingInputs=NULL);
     bool GetCoinAge(uint64& nCoinAge) const;  // Get transaction coin age
 protected:
-    static CTxOut GetOutputFor(const CTxIn& input, CCoinsView& mapInputs);
+    static const CTxOut &GetOutputFor(const CTxIn& input, CCoinsViewCache& mapInputs);
 };
 
 /** wrapper for CTxOut that provides a more compact serialization */
@@ -1446,9 +1447,9 @@ public:
     }
     
     // Undo the effects of this block (with given index) on the UTXO set represented by coins
-    bool DisconnectBlock(CBlockIndex *pindex, CCoinsView &coins);
+    bool DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &coins);
     // Apply the effects of this block (with given index) on the UTXO set represented by coins
-    bool ConnectBlock(CBlockIndex *pindex, CCoinsView &coins, bool fJustCheck=false);
+    bool ConnectBlock(CBlockIndex *pindex, CCoinsViewCache &coins, bool fJustCheck=false);
     // Read a block from disk
     bool ReadFromDisk(const CBlockIndex* pindex);
     // Add this block to the block index, and if necessary, switch the active block chain to this
@@ -2162,11 +2163,15 @@ public:
     bool GetCoins(uint256 txid, CCoins &coins);
     bool SetCoins(uint256 txid, const CCoins &coins);
     bool HaveCoins(uint256 txid);
+    CCoins &GetCoins(uint256 txid);
     CBlockIndex *GetBestBlock();
     bool SetBestBlock(CBlockIndex *pindex);
     bool BatchWrite(const std::map<uint256, CCoins> &mapCoins, CBlockIndex *pindex);
     bool Flush();
     unsigned int GetCacheSize();
+
+private:
+    std::map<uint256,CCoins>::iterator FetchCoins(uint256 txid);
 };
 
 /** CCoinsView that brings transactions from a memorypool into view.
