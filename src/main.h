@@ -148,36 +148,61 @@ class CTxUndo;
 class CCoinsView;
 class CCoinsViewCache;
 
+/** Register a wallet to receive updates from core */
 void RegisterWallet(CWallet* pwalletIn);
+/** Unregister a wallet from core */
 void UnregisterWallet(CWallet* pwalletIn);
+/** Push an updated transaction to all registered wallets */
 void SyncWithWallets(const uint256 &hash, const CTransaction& tx, const CBlock* pblock = NULL, bool fUpdate = false, bool fConnect = true);
+/** Process an incoming block */
 bool ProcessBlock(CNode* pfrom, CBlock* pblock, CDiskBlockPos *dbp = NULL);
+/** Check whether enough disk space is available for an incoming block */
 bool CheckDiskSpace(uint64 nAdditionalBytes=0);
+/** Open a block file (blk?????.dat) */
 FILE* OpenBlockFile(const CDiskBlockPos &pos, bool fReadOnly = false);
+/** Open an undo file (rev?????.dat) */
 FILE* OpenUndoFile(const CDiskBlockPos &pos, bool fReadOnly = false);
+/** Import blocks from an external file */
 bool LoadExternalBlockFile(FILE* fileIn, CDiskBlockPos *dbp = NULL);
+/** Load the block tree and coins database from disk */
 bool LoadBlockIndex();
+/** Verify consistency of the block and coin databases */
+bool VerifyDB();
+/** Print the loaded block tree */
 void PrintBlockTree();
+/** Find a block by height in the currently-connected chain */
 CBlockIndex* FindBlockByHeight(int nHeight);
+/** Process protocol messages received from a given node */
 bool ProcessMessages(CNode* pfrom);
+/** Send queued protocol messages to be sent to a give node */
 bool SendMessages(CNode* pto, bool fSendTrickle);
+/** Run the importer thread, which deals with reindexing, loading bootstrap.dat, and whatever is passed to -loadblock */
 void ThreadImport(void *parg);
+/** Run the miner threads */
 void GenerateBitcoins(bool fGenerate, CWallet* pwallet);
 unsigned int GetNextTargetRequired(const CBlockIndex* pindexLast, bool fProofOfStake);
+/** Check whether a block hash satisfies the proof-of-work requirement specified by nBits */
 bool CheckProofOfWork(uint256 hash, unsigned int nBits);
 int64 GetProofOfWorkReward(int nHeight, int64 nFees, uint256 prevHash);
 int64 GetProofOfStakeReward(int64 nCoinAge, unsigned int nBits, unsigned int nTime, int nHeight, bool bCoinYearOnly);
 int64 GetProofOfStakeRewardV1(int64 nCoinAge, unsigned int nBits, unsigned int nTime, int nHeight, bool bCoinYearOnly);
 int64 GetProofOfStakeRewardV2(int64 nCoinAge, unsigned int nBits, unsigned int nTime, int nHeight, bool bCoinYearOnly);
 int64 GetProofOfStakeRewardV3(int64 nCoinAge, unsigned int nBits, unsigned int nTime, int nHeight, bool bCoinYearOnly);
+/** Calculate the minimum amount of work a received block needs, without knowing its direct parent */
 unsigned int ComputeMinWork(unsigned int nBase, int64 nTime);
 unsigned int ComputeMinStake(unsigned int nBase, int64 nTime, unsigned int nBlockTime);
 int GetNumBlocksOfPeers();
+/** Check whether we are doing an initial block download (synchronizing from disk or network) */
 bool IsInitialBlockDownload();
+/** Format a string that describes several potential problems detected by the core */
 std::string GetWarnings(std::string strFor);
+/** Retrieve a transaction (from memory pool, or from disk, if possible) */
 bool GetTransaction(const uint256 &hash, CTransaction &tx, uint256 &hashBlock, bool fAllowSlow);
+/** Connect/disconnect blocks until pindexNew is the new tip of the active block chain */
 bool SetBestChain(CBlockIndex* pindexNew);
+/** Find the best known block, and make it the tip of the block chain */
 bool ConnectBestBlock();
+/** Create a new block index entry for a given block hash */
 CBlockIndex * InsertBlockIndex(uint256 hash);
 uint256 WantedByOrphan(const CBlock* pblockOrphan);
 const CBlockIndex* GetLastBlockIndex(const CBlockIndex* pindex, bool fProofOfStake);
@@ -815,7 +840,7 @@ public:
         READWRITE(vtxundo);
     )
 
-    bool WriteToDisk(CDiskBlockPos &pos)
+    bool WriteToDisk(CDiskBlockPos &pos, const uint256 &hashBlock)
     {
         // Open history file to append
         CAutoFile fileout = CAutoFile(OpenUndoFile(pos), SER_DISK, CLIENT_VERSION);
@@ -832,6 +857,12 @@ public:
             return error("CBlockUndo::WriteToDisk() : ftell failed");
         pos.nPos = (unsigned int)fileOutPos;
         fileout << *this;
+        
+        // calculate & write checksum
+        CHashWriter hasher(SER_GETHASH, PROTOCOL_VERSION);
+        hasher << hashBlock;
+        hasher << *this;
+        fileout << hasher.GetHash();
 
         // Flush stdio buffers and commit to disk before returning
         fflush(fileout);
@@ -839,7 +870,44 @@ public:
             FileCommit(fileout);
 
         return true;
-    }    
+    }   
+    
+    bool ReadFromDisk(const CDiskBlockPos &pos, const uint256 &hashBlock)
+    {
+        // Open history file to read
+        CAutoFile filein = CAutoFile(OpenUndoFile(pos, true), SER_DISK, CLIENT_VERSION);
+        if (!filein)
+            return error("CBlockUndo::ReadFromDisk() : OpenBlockFile failed");
+
+        // Read block
+        uint256 hashChecksum;
+        try {
+            filein >> *this;
+        }
+        catch (std::exception &e) {
+            return error("%s() : deserialize or I/O error", __PRETTY_FUNCTION__);
+        }
+
+        // for compatibility with pre-release code that didn't write checksums to undo data
+        // TODO: replace by a simply 'filein >> hashChecksum' in the above try block
+        try {
+            filein >> hashChecksum;
+        } catch (std::exception &e) {
+            hashChecksum = 0;
+        }
+        uint32_t hashInit = hashChecksum.Get64(0) & 0xFFFFFFFFUL;
+        if (hashChecksum == 0 || memcmp(&hashInit, pchMessageStart, 4) == 0)
+            return true;
+
+        // Verify checksum
+        CHashWriter hasher(SER_GETHASH, PROTOCOL_VERSION);
+        hasher << hashBlock;
+        hasher << *this;
+        if (hashChecksum != hasher.GetHash())
+            return error("CBlockUndo::ReadFromDisk() : checksum mismatch");
+
+        return true;
+    }
 
 };
 
@@ -1446,8 +1514,11 @@ public:
         printf("\n");
     }
     
-    // Undo the effects of this block (with given index) on the UTXO set represented by coins
-    bool DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &coins);
+    /** Undo the effects of this block (with given index) on the UTXO set represented by coins.
+     *  In case pfClean is provided, operation will try to be tolerant about errors, and *pfClean
+     *  will be true if no problems were found. Otherwise, the return value will be false in case
+     *  of problems. Note that in any case, coins may be modified. */
+    bool DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &coins, bool *pfClean = NULL);
     // Apply the effects of this block (with given index) on the UTXO set represented by coins
     bool ConnectBlock(CBlockIndex *pindex, CCoinsViewCache &coins, bool fJustCheck=false);
     // Read a block from disk

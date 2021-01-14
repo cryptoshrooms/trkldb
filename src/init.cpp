@@ -298,7 +298,7 @@ std::string HelpMessage()
     	"  -splitthreshold=<n>    " + _("Set stake split threshold within range (default: 300, max: 10000)") + "\n" +
         "  -salvagewallet         " + _("Attempt to recover private keys from a corrupt wallet.dat") + "\n" +
         "  -checkblocks=<n>       " + _("How many blocks to check at startup (default: 2500, 0 = all)") + "\n" +
-        "  -checklevel=<n>        " + _("How thorough the block verification is (0-6, default: 1)") + "\n" +
+        "  -checklevel=<n>        " + _("How thorough the block verification is (0-4, default: 3)") + "\n" +
         "  -txindex               " + _("Maintain a full transaction index (default: 1)") + "\n" +
         "  -loadblock=<file>      " + _("Imports blocks from external blk000?.dat file") + "\n" +
         "  -reindex               " + _("Rebuild blockchain index from current blk000??.dat files") + "\n" +
@@ -804,7 +804,10 @@ bool AppInit2()
         pblocktree->WriteReindexing(true);
     
     if (!LoadBlockIndex())
-        return InitError(_("Error loading blkindex.dat"));
+        return InitError(_("Error loading block/coin databases"));
+
+    if (!VerifyDB())
+        return InitError(_("Corrupted database detected. Please restart the client with -reindex."));
     
     if (mapArgs.count("-txindex") && fTxIndex != GetBoolArg("-txindex", false))
         return InitError(_("You need to rebuild the databases using -reindex to change -txindex"));

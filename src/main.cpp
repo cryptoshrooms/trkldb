@@ -1594,23 +1594,24 @@ bool CTransaction::ClientCheckInputs() const
     return true;
 }
 
-bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view)
+bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view, bool *pfClean)
 {
     assert(pindex == view.GetBestBlock());
+    
+    if (pfClean)
+        *pfClean = false;
+
+    bool fClean = true;
 
     CBlockUndo blockUndo;
-    {
-        CDiskBlockPos pos = pindex->GetUndoPos();
-        if (pos.IsNull())
-            return error("DisconnectBlock() : no undo data available");
-        FILE *file = OpenUndoFile(pos, true);
-        if (file == NULL)
-            return error("DisconnectBlock() : undo file not available");
-        CAutoFile fileUndo(file, SER_DISK, CLIENT_VERSION);
-        fileUndo >> blockUndo;
-    }
+    CDiskBlockPos pos = pindex->GetUndoPos();
+    if (pos.IsNull())
+        return error("DisconnectBlock() : no undo data available");
+    if (!blockUndo.ReadFromDisk(pos, pindex->pprev->GetBlockHash()))
+        return error("DisconnectBlock() : failure reading undo data");
 
-    assert(blockUndo.vtxundo.size() + 1 == vtx.size());
+    if (blockUndo.vtxundo.size() + 1 != vtx.size())
+        return error("DisconnectBlock() : block and undo data inconsistent");
 
     // undo transactions in reverse order
     for (int i = vtx.size() - 1; i >= 0; i--) {
@@ -1622,13 +1623,15 @@ bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view)
             continue;
         
         // check that all outputs are available
-        if (!view.HaveCoins(hash))
-            return error("DisconnectBlock() : outputs still spent? database corrupted");
+        if (!view.HaveCoins(hash)) {
+            fClean = fClean && error("DisconnectBlock() : outputs still spent? database corrupted");
+            view.SetCoins(hash, CCoins());
+        }
         CCoins &outs = view.GetCoins(hash);
 
         CCoins outsBlock = CCoins(tx, pindex->nHeight, pindex->nTime);
         if (outs != outsBlock)
-            return error("DisconnectBlock() : added transaction mismatch? database corrupted");
+            fClean = fClean && error("DisconnectBlock() : added transaction mismatch? database corrupted");
 
         // remove outputs
         outs = CCoins();
@@ -1636,15 +1639,18 @@ bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view)
         // restore inputs
         if (i > 0) { // not coinbases
             const CTxUndo &txundo = blockUndo.vtxundo[i-1];
-            assert(txundo.vprevout.size() == tx.vin.size());
+            if (txundo.vprevout.size() != tx.vin.size())
+                return error("DisconnectBlock() : transaction and undo data inconsistent");
             for (unsigned int j = tx.vin.size(); j-- > 0;) {
                 const COutPoint &out = tx.vin[j].prevout;
                 const CTxInUndo &undo = txundo.vprevout[j];
                 CCoins coins;
                 view.GetCoins(out.hash, coins); // this can fail if the prevout was already entirely spent
-                if (coins.IsPruned()) {
-                    if (undo.nHeight == 0)
-                        return error("DisconnectBlock() : undo data doesn't contain tx metadata? database corrupted");
+                if (undo.nHeight != 0) {
+                    // undo data contains height: this is the last output of the prevout tx being spent
+                    if (!coins.IsPruned())
+                        fClean = fClean && error("DisconnectBlock() : undo data overwriting existing transaction");
+                    coins = CCoins();
                     coins.fCoinBase = undo.fCoinBase;
                     coins.fCoinStake = undo.fCoinStake;
                     coins.nHeight = undo.nHeight;
@@ -1652,11 +1658,11 @@ bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view)
                     coins.nBlockTime = undo.nBlockTime;
                     coins.nVersion = undo.nVersion;
                 } else {
-                    if (undo.nHeight != 0)
-                        return error("DisconnectBlock() : undo data contains unneeded tx metadata? database corrupted");
+                    if (coins.IsPruned())
+                        fClean = fClean && error("DisconnectBlock() : undo data adding output to missing transaction");
                 }
                 if (coins.IsAvailable(out.n))
-                    return error("DisconnectBlock() : prevout output not spent? database corrupted");
+                    fClean = fClean && error("DisconnectBlock() : undo data overwriting existing output");
                 if (coins.vout.size() < out.n+1)
                     coins.vout.resize(out.n+1);
                 coins.vout[out.n] = undo.txout;
@@ -1669,7 +1675,12 @@ bool CBlock::DisconnectBlock(CBlockIndex *pindex, CCoinsViewCache &view)
     // move best block pointer to prevout block
     view.SetBestBlock(pindex->pprev);
 
-    return true;
+    if (pfClean) {
+        *pfClean = fClean;
+        return true;
+    } else {
+        return fClean;
+    }
 }
 
 void static FlushBlockFile()
@@ -1808,9 +1819,9 @@ bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJust
     {
         if (pindex->GetUndoPos().IsNull()) {
             CDiskBlockPos pos;
-            if (!FindUndoPos(pindex->nFile, pos, ::GetSerializeSize(blockundo, SER_DISK, CLIENT_VERSION) + 8))
+            if (!FindUndoPos(pindex->nFile, pos, ::GetSerializeSize(blockundo, SER_DISK, CLIENT_VERSION) + 40))
                 return error("ConnectBlock() : FindUndoPos failed");
-            if (!blockundo.WriteToDisk(pos))
+            if (!blockundo.WriteToDisk(pos, pindex->pprev->GetBlockHash()))
                 return error("ConnectBlock() : CBlockUndo::WriteToDisk failed");
 
             // update nUndoPos in block index
@@ -2764,14 +2775,14 @@ bool static LoadBlockIndexDB()
     {
         CBlockIndex* pindex = item.second;
         pindex->bnChainTrust = (pindex->pprev ? pindex->pprev->bnChainTrust : 0) + pindex->GetBlockTrust();
-        pindex->nChainTx = (pindex->pprev ? pindex->pprev->nChainTx : 0) + pindex->nTx;
-        if ((pindex->nStatus & BLOCK_VALID_MASK) >= BLOCK_VALID_TRANSACTIONS && !(pindex->nStatus & BLOCK_FAILED_MASK))
-            setBlockIndexValid.insert(pindex);
-
         // Calculate stake modifier checksum
         pindex->nStakeModifierChecksum = GetStakeModifierChecksum(pindex);
         if (!CheckStakeModifierCheckpoints(pindex->nHeight, pindex->nStakeModifierChecksum))
             return error("LoadBlockIndexDB() : Failed stake modifier checkpoint height=%d, modifier=0x%016" PRI64x , pindex->nHeight, pindex->nStakeModifier);
+
+        pindex->nChainTx = (pindex->pprev ? pindex->pprev->nChainTx : 0) + pindex->nTx;
+        if ((pindex->nStatus & BLOCK_VALID_MASK) >= BLOCK_VALID_TRANSACTIONS && !(pindex->nStatus & BLOCK_FAILED_MASK))
+            setBlockIndexValid.insert(pindex);
     }
 
     // Load block file info
@@ -2780,14 +2791,32 @@ bool static LoadBlockIndexDB()
     if (pblocktree->ReadBlockFileInfo(nLastBlockFile, infoLastBlockFile))
         printf("LoadBlockIndexDB(): last block file: %s\n", infoLastBlockFile.ToString().c_str());
 
+    // Load sync-checkpoint
+    if (!pblocktree->ReadSyncCheckpoint(Checkpoints::hashSyncCheckpoint))
+    {
+        printf("LoadBlockIndexDB(): synchronized checkpoint not read\n");
+        Checkpoints::hashSyncCheckpoint = hashGenesisBlock;
+    }
+    printf("LoadBlockIndexDB(): synchronized checkpoint %s\n", Checkpoints::hashSyncCheckpoint.ToString().c_str());
+
+    // Load bnBestInvalidTrust, OK if it doesn't exist
+    CBigNum bnBestInvalidTrust;
+    pblocktree->ReadBestInvalidTrust(bnBestInvalidTrust);
+//    nBestInvalidTrust = bnBestInvalidTrust.getuint256();
+
+    // Check whether we need to continue reindexing
+    bool fReindexing = false;
+    pblocktree->ReadReindexing(fReindexing);
+    fReindex |= fReindexing;
+    
+    // Check whether we have a transaction index
+    pblocktree->ReadFlag("txindex", fTxIndex);
+    printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
+
     // Load hashBestChain pointer to end of best chain
     pindexBest = pcoinsTip->GetBestBlock();
     if (pindexBest == NULL)
-    {
-        if (pindexGenesisBlock == NULL)
-            return true;
-        return error("LoadBlockIndexDB() : hashBestChain not loaded");
-    }
+        return true;
     hashBestChain = pindexBest->GetBlockHash();
     nBestHeight = pindexBest->nHeight;
 //    nBestChainTrust = pindexBest->bnChainTrust;
@@ -2802,55 +2831,77 @@ bool static LoadBlockIndexDB()
     printf("LoadBlockIndexDB(): hashBestChain=%s  height=%d date=%s\n",
         hashBestChain.ToString().substr(0,20).c_str(), nBestHeight,
         DateTimeStrFormat("%x %H:%M:%S", pindexBest->GetBlockTime()).c_str());
-
-    // Load sync-checkpoint
-    if (!pblocktree->ReadSyncCheckpoint(Checkpoints::hashSyncCheckpoint))
-        return error("LoadBlockIndexDB() : hashSyncCheckpoint not loaded");
-    printf("LoadBlockIndexDB(): synchronized checkpoint %s\n", Checkpoints::hashSyncCheckpoint.ToString().c_str());
-
-    // Load bnBestInvalidTrust, OK if it doesn't exist
-    CBigNum bnBestInvalidTrust;
-    pblocktree->ReadBestInvalidTrust(bnBestInvalidTrust);
-//    nBestInvalidTrust = bnBestInvalidTrust.getuint256();
     
-    // Check whether we need to continue reindexing
-    bool fReindexing = false;
-    pblocktree->ReadReindexing(fReindexing);
-    fReindex |= fReindexing;
-    
-    // Check whether we have a transaction index
-    pblocktree->ReadFlag("txindex", fTxIndex);
-    printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
+    return true;
+}
+
+bool VerifyDB() {
+    if (pindexBest == NULL || pindexBest->pprev == NULL)
+        return true;
 
     // Verify blocks in the best chain
-    int nCheckLevel = GetArg("-checklevel", 1);
-    int nCheckDepth = GetArg( "-checkblocks", 2500);
+    int nCheckLevel = GetArg("-checklevel", 3);
+    int nCheckDepth = GetArg( "-checkblocks", 288);
     if (nCheckDepth == 0)
         nCheckDepth = 1000000000; // suffices until the year 19000
     if (nCheckDepth > nBestHeight)
         nCheckDepth = nBestHeight;
+    nCheckLevel = std::max(0, std::min(4, nCheckLevel));
     printf("Verifying last %i blocks at level %i\n", nCheckDepth, nCheckLevel);
-    CBlockIndex* pindexFork = NULL;
+    CCoinsViewCache coins(*pcoinsTip, true);
+    CBlockIndex* pindexState = pindexBest;
+    CBlockIndex* pindexFailure = NULL;
+    int nGoodTransactions = 0;
     for (CBlockIndex* pindex = pindexBest; pindex && pindex->pprev; pindex = pindex->pprev)
     {
         if (fRequestShutdown || pindex->nHeight < nBestHeight-nCheckDepth)
             break;
         CBlock block;
+        // check level 0: read from disk
         if (!block.ReadFromDisk(pindex))
-            return error("LoadBlockIndexDB() : block.ReadFromDisk failed");
+            return error("VerifyDB() : *** block.ReadFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
         // check level 1: verify block validity
-        if (nCheckLevel>0 && !block.CheckBlock())
-        {
-            printf("LoadBlockIndexDB() : *** found bad block at %d, hash=%s\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
-            pindexFork = pindex->pprev;
+        if (nCheckLevel >= 1 && !block.CheckBlock())
+            return error("VerifyDB() : *** found bad block at %d, hash=%s\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
+        // check level 2: verify undo validity
+        if (nCheckLevel >= 2 && pindex) {
+            CBlockUndo undo;
+            CDiskBlockPos pos = pindex->GetUndoPos();
+            if (!pos.IsNull()) {
+                if (!undo.ReadFromDisk(pos, pindex->pprev->GetBlockHash()))
+                    return error("VerifyDB() : *** found bad undo data at %d, hash=%s\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
+            }
         }
-        // TODO: stronger verifications
+        // check level 3: check for inconsistencies during memory-only disconnect of tip blocks
+        if (nCheckLevel >= 3 && pindex == pindexState && (coins.GetCacheSize() + pcoinsTip->GetCacheSize()) <= 2*nCoinCacheSize + 32000) {
+            bool fClean = true;
+            if (!block.DisconnectBlock(pindex, coins, &fClean))
+                return error("VerifyDB() : *** irrecoverable inconsistency in block data at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
+            pindexState = pindex->pprev;
+            if (!fClean) {
+                nGoodTransactions = 0;
+                pindexFailure = pindex;
+            } else
+                nGoodTransactions += block.vtx.size();
+        }
     }
-    if (pindexFork && !fRequestShutdown)
-    {
-        // TODO: reorg back
-        return error("LoadBlockIndexDB(): chain database corrupted");
+    if (pindexFailure)
+        return error("VerifyDB() : *** coin database inconsistencies found (last %i blocks, %i good transactions before that)\n", pindexBest->nHeight - pindexFailure->nHeight + 1, nGoodTransactions);
+
+    // check level 4: try reconnecting blocks
+    if (nCheckLevel >= 4) {
+        CBlockIndex *pindex = pindexState;
+        while (pindex != pindexBest && !fRequestShutdown) {
+             pindex = pindex->pnext;
+             CBlock block;
+             if (!block.ReadFromDisk(pindex))
+                 return error("VerifyDB() : *** block.ReadFromDisk failed at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
+             if (!block.ConnectBlock(pindex, coins))
+                 return error("VerifyDB() : *** found unconnectable block at %d, hash=%s", pindex->nHeight, pindex->GetBlockHash().ToString().c_str());
+        }
     }
+
+    printf("No coin database inconsistencies in last %i blocks (%i transactions)\n", pindexBest->nHeight - pindexState->nHeight, nGoodTransactions);
 
     return true;
 }
