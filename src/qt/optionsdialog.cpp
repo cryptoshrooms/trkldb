@@ -128,7 +128,6 @@ void OptionsDialog::setMapper()
     /* Main */
     mapper->addMapping(ui->transactionFee, OptionsModel::Fee);
     mapper->addMapping(ui->bitcoinAtStartup, OptionsModel::StartAtStartup);
-    mapper->addMapping(ui->detachDatabases, OptionsModel::DetachDatabases);
     mapper->addMapping(ui->splitThreshold, OptionsModel::SplitThreshold);
     mapper->addMapping(ui->maxSplitThreshold, OptionsModel::MaxSplitThreshold);
 

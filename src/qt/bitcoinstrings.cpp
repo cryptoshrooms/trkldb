@@ -27,8 +27,6 @@ QT_TRANSLATE_NOOP("truckcoin-core", ""
 "Cannot obtain a lock on data directory %s.  Truckcoin is probably already "
 "running."),
 QT_TRANSLATE_NOOP("truckcoin-core", ""
-"Detach block and address databases. Increases shutdown time (default: 0)"),
-QT_TRANSLATE_NOOP("truckcoin-core", ""
 "Error initializing database environment %s! To recover, BACKUP THAT "
 "DIRECTORY, then remove everything from it except for wallet.dat."),
 QT_TRANSLATE_NOOP("truckcoin-core", ""
