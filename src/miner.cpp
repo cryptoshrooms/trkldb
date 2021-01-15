@@ -332,7 +332,7 @@ CBlock* CreateNewBlock(CWallet* pwallet, bool fProofOfStake)
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS)
                 continue;
             
-            if (!tx.CheckInputs(viewTemp, CS_ALWAYS, true, false))
+            if (!tx.CheckInputs(viewTemp, CS_ALWAYS, SCRIPT_VERIFY_P2SH))
                 continue;
             
 /*

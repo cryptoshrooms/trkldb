@@ -210,7 +210,7 @@ double BlockBrowser::getTxFees(std::string txid)
     if (!GetTransaction(hash, tx, hashBlock, false))
         return convertCoins(MIN_TX_FEE);
 
-    if (!tx.CheckInputs(view, CS_ALWAYS, false, false))
+    if (!tx.CheckInputs(view, CS_ALWAYS, SCRIPT_VERIFY_P2SH))
 	      return convertCoins(MIN_TX_FEE);
 		  
     int64 nTxFees = tx.GetValueIn(view)-tx.GetValueOut();
