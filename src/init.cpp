@@ -801,6 +801,11 @@ bool AppInit2()
         return InitError(msg);
     }
     
+    // create database directories if not exist
+    filesystem::path blocksDir = GetDataDir() / "blocks";
+    if (!filesystem::exists(blocksDir))
+        filesystem::create_directories(blocksDir);
+
     // cache size calculations
     int64_t nTotalCache = GetArg("-dbcache", 25) << 20;
     if (nTotalCache < (1 << 22))
