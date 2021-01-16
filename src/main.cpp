@@ -11,6 +11,7 @@
 #include "net.h"
 #include "init.h" 
 #include "ui_interface.h"
+#include "checkqueue.h"
 #include "kernel.h"
 #include "scrypt_mine.h"
 #include <boost/algorithm/string/replace.hpp>
@@ -56,9 +57,10 @@ CBigNum bnBestInvalidTrust = 0;
 uint256 hashBestChain = 0;
 CBlockIndex* pindexBest = NULL;
 int64 nTimeBestReceived = 0;
+int nScriptCheckThreads = 0;
 bool fImporting = false;
 bool fReindex = false;
-bool fTxIndex = true;
+bool fTxIndex = false;
 set<CBlockIndex*, CBlockIndexTrustComparator> setBlockIndexValid; // may contain all CBlockIndex*'s that have validness >=BLOCK_VALID_TRANSACTIONS, and must contain those who aren't failed
 unsigned int nCoinCacheSize = 5000;
 
@@ -1468,10 +1470,13 @@ bool VerifySignature(const CCoins& txFrom, const CTransaction& txTo, unsigned in
     return CScriptCheck(txFrom, txTo, nIn, flags, nHashType)();
 }
 
-bool CTransaction::CheckInputs(CCoinsViewCache &inputs, bool fScriptChecks, unsigned int flags, CBlock *pblock) const
+bool CTransaction::CheckInputs(CCoinsViewCache &inputs, bool fScriptChecks, unsigned int flags, std::vector<CScriptCheck> *pvChecks, CBlock *pblock) const
 {
     if (!IsCoinBase())
     {
+        if (pvChecks)
+            pvChecks->reserve(vin.size());
+
         // This doesn't trigger the DoS code on purpose; if it did, it would make it easier
         // for an attacker to attempt to split the network.
         if (!HaveInputs(inputs))
@@ -1549,8 +1554,12 @@ bool CTransaction::CheckInputs(CCoinsViewCache &inputs, bool fScriptChecks, unsi
                 const CCoins &coins = inputs.GetCoins(prevout.hash);
 
                 // Verify signature
-                if (!VerifySignature(coins, *this, i, flags, 0))
-                    return DoS(100,error("CheckInputs() : %s VerifySignature failed", GetHash().ToString().substr(0,10).c_str()));
+                CScriptCheck check(coins, *this, i, flags, 0);
+                if (pvChecks) {
+                    pvChecks->push_back(CScriptCheck());
+                    check.swap(pvChecks->back());
+                } else if (!check())
+                    return DoS(100,false);
             }
         }
         
@@ -1715,6 +1724,19 @@ void static FlushBlockFile()
 
 bool FindUndoPos(int nFile, CDiskBlockPos &pos, unsigned int nAddSize);
 
+static CCheckQueue<CScriptCheck> scriptcheckqueue(128);
+
+void ThreadScriptCheck(void*) {
+    vnThreadsRunning[THREAD_SCRIPTCHECK]++;
+    RenameThread("bitcoin-scriptch");
+    scriptcheckqueue.Thread();
+    vnThreadsRunning[THREAD_SCRIPTCHECK]--;
+}
+
+void ThreadScriptCheckQuit() {
+    scriptcheckqueue.Quit();
+}
+
 bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJustCheck)
 {
     // Check it again in case a previous version let a bad block in
@@ -1752,6 +1774,8 @@ bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJust
     bool fStrictPayToScriptHash = true;
     
     CBlockUndo blockundo;
+    
+    CCheckQueueControl<CScriptCheck> control(fScriptChecks && nScriptCheckThreads ? &scriptcheckqueue : NULL);
 
     int64 nFees = 0, nValueIn = 0, nValueOut = 0;
     unsigned int nSigOps = 0;
@@ -1765,7 +1789,9 @@ bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJust
         if (nSigOps > MAX_BLOCK_SIGOPS)
             return DoS(100, error("ConnectBlock() : too many sigops"));
 
-        if (!tx.IsCoinBase())
+        if (tx.IsCoinBase())
+            nValueOut += tx.GetValueOut();
+        else
         {
             if (!tx.HaveInputs(view))
                 return DoS(100, error("ConnectBlock() : inputs missing/spent"));
@@ -1780,21 +1806,20 @@ bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJust
                     return DoS(100, error("ConnectBlock() : too many sigops"));
             }
 
-            int64 nTxValueOut = tx.GetValueOut();
             int64 nTxValueIn  = tx.GetValueIn(view);
+            int64 nTxValueOut = tx.GetValueOut();
+
 
             nValueIn += nTxValueIn;
             nValueOut += nTxValueOut;
 
             if (!tx.IsCoinStake())
                 nFees += nTxValueIn - nTxValueOut;
-            
-            if (!tx.CheckInputs(view, fScriptChecks, fStrictPayToScriptHash ? SCRIPT_VERIFY_P2SH : SCRIPT_VERIFY_NONE, this))
+
+            std::vector<CScriptCheck> vChecks;
+            if (!tx.CheckInputs(view, fScriptChecks, fStrictPayToScriptHash ? SCRIPT_VERIFY_P2SH : SCRIPT_VERIFY_NONE, nScriptCheckThreads ? &vChecks : NULL, this))
                 return false;
-        }
-        else
-        {
-            nValueOut += tx.GetValueOut();
+            control.Add(vChecks);
         }
 
         // don't create coinbase coins for proof-of-stake block
@@ -1813,6 +1838,9 @@ bool CBlock::ConnectBlock(CBlockIndex* pindex, CCoinsViewCache &view, bool fJust
 
     pindex->nMint = nValueOut - nValueIn + nFees;
     pindex->nMoneySupply = (pindex->pprev? pindex->pprev->nMoneySupply : 0) + nValueOut - nValueIn;
+    
+    if (!control.Wait())
+        return DoS(100, false);
 
     if (fJustCheck)
         return true;
@@ -1979,7 +2007,7 @@ bool SetBestChain(CBlockIndex* pindexNew)
 
     // Resurrect memory transactions that were in the disconnected branch
     BOOST_FOREACH(CTransaction& tx, vResurrect)
-        tx.AcceptToMemoryPool(false);
+        tx.AcceptToMemoryPool();
 
     // Delete redundant memory transactions that are in the connected branch
     BOOST_FOREACH(CTransaction& tx, vDelete)
@@ -2823,8 +2851,10 @@ bool static LoadBlockIndexDB()
     fReindex |= fReindexing;
     
     // Check whether we have a transaction index
+    if (!mapBlockIndex.empty()) {
     pblocktree->ReadFlag("txindex", fTxIndex);
-    printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
+    printf("LoadBlockIndexDB(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
+    }
 
     // Load hashBestChain pointer to end of best chain
     pindexBest = pcoinsTip->GetBestBlock();
@@ -2949,12 +2979,19 @@ bool LoadBlockIndex()
     if (mapBlockIndex.empty())
     {
         fTxIndex = GetBoolArg("-txindex", false);
+//        fTxIndex = true; // txindex is always enabled
         pblocktree->WriteFlag("txindex", fTxIndex);
         printf("Initializing databases...\n");
 
         if (fReindex)
             return true;
+        
+        // Check whether we started with transaction index
+        pblocktree->ReadFlag("txindex", fTxIndex);
+        printf("LoadBlockIndex(): transaction index %s\n", fTxIndex ? "enabled" : "disabled");
 
+        // Only add the genesis block if not reindexing (in which case we reuse the one already on disk)
+        if (!fReindex) {
         // Genesis block
         const char* pszTimestamp = "29/5/14 - Replica Ghostbusters car stops the traffic - BBC UK";
         CTransaction txNew;
@@ -3011,6 +3048,7 @@ bool LoadBlockIndex()
         // Initialize synchronized checkpoint
         if (!Checkpoints::WriteSyncCheckpoint((!fTestNet ? hashGenesisBlock : hashGenesisBlockTestNet)))
             return error("LoadBlockIndex() : failed to init sync checkpoint");
+        }
     }
 
     string strPubKey = "";
