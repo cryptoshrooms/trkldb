@@ -2978,8 +2978,8 @@ bool LoadBlockIndex()
     //
     if (mapBlockIndex.empty())
     {
-        fTxIndex = GetBoolArg("-txindex", false);
-//        fTxIndex = true; // txindex is always enabled
+//        fTxIndex = GetBoolArg("-txindex", false);
+        fTxIndex = true; // txindex is always enabled
         pblocktree->WriteFlag("txindex", fTxIndex);
         printf("Initializing databases...\n");
 
