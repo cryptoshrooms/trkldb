@@ -963,8 +963,10 @@ bool AppInit2()
 
     // ********************************************************* Step 9: import blocks
     
+    // scan for better chains in the block chain database, that are not yet connected in the active best chain
     uiInterface.InitMessage(_("Importing blocks from block database..."));
-    if (!ConnectBestBlock())
+    CValidationState state;
+    if (!ConnectBestBlock(state))
         strErrors << "Failed to connect best block";
     
     CImportData *pimport = new CImportData();

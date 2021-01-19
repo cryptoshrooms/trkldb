@@ -533,7 +533,8 @@ Value sendrawtransaction(const Array& params, bool fHelp)
         fHave = view.GetCoins(hashTx, existingCoins);
         if (!fHave) {
             // push to local node
-            if (!tx.AcceptToMemoryPool())
+            CValidationState state;
+            if (!tx.AcceptToMemoryPool(state))
                 throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX rejected");
         }
     }

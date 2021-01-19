@@ -332,14 +332,15 @@ CBlock* CreateNewBlock(CWallet* pwallet, bool fProofOfStake)
             if (nBlockSigOps + nTxSigOps >= MAX_BLOCK_SIGOPS)
                 continue;
             
-            if (!tx.CheckInputs(viewTemp, true, SCRIPT_VERIFY_P2SH))
+            CValidationState state;
+            if (!tx.CheckInputs(state, viewTemp, true, SCRIPT_VERIFY_P2SH))
                 continue;
             
 /*
  * We need to call UpdateCoins using actual block timestamp, so don't perform this here.
  *
             CTxUndo txundo;
-            if (!tx.UpdateCoins(viewTemp, txundo, pindexPrev->nHeight+1, pblock->nTime))
+            if (!tx.UpdateCoins(state, viewTemp, txundo, pindexPrev->nHeight+1, pblock->nTime))
                 continue;
 
             // push changes from the second layer cache to the first one
@@ -494,7 +495,8 @@ bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey)
         }
 
         // Process this block the same as if we had received it from another node
-        if (!ProcessBlock(NULL, pblock))
+        CValidationState state;
+        if (!ProcessBlock(state, NULL, pblock))
             return error("CheckWork : ProcessBlock, block not accepted");
     }
 
@@ -505,12 +507,13 @@ bool CheckStake(CBlock* pblock, CWallet& wallet)
 {
     uint256 proofHash = 0, hashTarget = 0;
     uint256 hashBlock = pblock->GetHash();
+    CValidationState state;
 
     if(!pblock->IsProofOfStake())
         return error("CheckStake() : %s is not a proof-of-stake block", hashBlock.GetHex().c_str());
 
     // verify hash target and signature of coinstake tx
-    if (!CheckProofOfStake(pblock->vtx[1], pblock->nBits, proofHash, hashTarget))
+    if (!CheckProofOfStake(state, pblock->vtx[1], pblock->nBits, proofHash, hashTarget))
         return error("CheckStake() : proof-of-stake checking failed");
 
     //// debug print
@@ -531,7 +534,8 @@ bool CheckStake(CBlock* pblock, CWallet& wallet)
         }
 
         // Process this block the same as if we had received it from another node
-        if (!ProcessBlock(NULL, pblock))
+        CValidationState state;
+        if (!ProcessBlock(state, NULL, pblock))
             return error("CheckStake() : ProcessBlock, block not accepted");
     }
 
