@@ -2464,10 +2464,39 @@ bool ProcessBlock(CValidationState &state, CNode* pfrom, CBlock* pblock, CDiskBl
         return state.Invalid(error("ProcessBlock() : already have block (orphan) %s", hash.ToString().substr(0,20).c_str()));
 
     // check proof-of-stake
-    // Limited duplicity on stake: prevents block flood attack
-    // Duplicate stake allowed only when there is orphan child block
-    if (pblock->IsProofOfStake() && setStakeSeen.count(pblock->GetProofOfStake()) && !mapOrphanBlocksByPrev.count(hash) && !Checkpoints::WantedByPendingSyncCheckpoint(hash))
-        return error("ProcessBlock() : duplicate proof-of-stake (%s, %d) for block %s", pblock->GetProofOfStake().first.ToString().c_str(), pblock->GetProofOfStake().second, hash.ToString().c_str());
+    if (pblock->IsProofOfStake())
+    {
+        std::pair<COutPoint, unsigned int> proofOfStake = pblock->GetProofOfStake();
+
+        if (pindexBest->IsProofOfStake() && proofOfStake.first == pindexBest->prevoutStake)
+        {
+            // The best block's stake is reused, we cancel the best block
+
+            // Only reject the best block if the duplicate is correctly signed
+            if (!pblock->CheckBlockSignature(true))
+                return state.DoS(100, error("ProcessBlock() : Invalid signature in duplicate block"));
+
+            printf("ProcessBlock() : block uses the same stake as the best block. Canceling the best block\n");
+
+            // Relay the duplicate block so that other nodes are aware of the duplication
+            RelayBlock(*pblock, hash);
+
+            // Cancel the best block
+            InvalidBlockFound(pindexBest);
+            CValidationState stateDummy;
+            if (!SetBestChain(stateDummy, pindexBest->pprev))
+                return error("ProcessBlock(): SetBestChain on previous best block failed");
+
+            return false;
+        }
+        else
+        {
+            // Limited duplicity on stake: prevents block flood attack
+            // Duplicate stake allowed only when there is orphan child block
+            if (pblock->IsProofOfStake() && setStakeSeen.count(proofOfStake) && !mapOrphanBlocksByPrev.count(hash) && !Checkpoints::WantedByPendingSyncCheckpoint(hash))
+                return error("ProcessBlock() : duplicate proof-of-stake (%s, %d) for block %s", proofOfStake.first.ToString().c_str(), proofOfStake.second, hash.ToString().c_str());
+        }
+    }
 
     // Preliminary checks
     if (!pblock->CheckBlock(state))
@@ -3433,6 +3462,9 @@ void static ProcessGetData(CNode* pfrom)
             if (fShutdown)
                 break;
             it++;
+            
+            // ppcoin: relay memory may contain blocks too
+            bool found = false;
 
             if (inv.type == MSG_BLOCK || inv.type == MSG_FILTERED_BLOCK)
             {
@@ -3440,6 +3472,7 @@ void static ProcessGetData(CNode* pfrom)
                 map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(inv.hash);
                 if (mi != mapBlockIndex.end())
                 {
+                    found = true;
                     CBlock block;
                     block.ReadFromDisk((*mi).second);
                     if (inv.type == MSG_BLOCK)
@@ -3479,7 +3512,8 @@ void static ProcessGetData(CNode* pfrom)
                     }
                 }
             }
-            else if (inv.IsKnownType())
+
+            if (!found && inv.IsKnownType())
             {
                 // Send stream from relay memory
                 bool pushed = false;
