@@ -3409,14 +3409,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         printf("receive version message: version %d, blocks=%d, us=%s, them=%s, peer=%s\n", pfrom->nVersion, pfrom->nStartingHeight, addrMe.ToString().c_str(), addrFrom.ToString().c_str(), pfrom->addr.ToString().c_str());
 
         cPeerBlockCounts.input(pfrom->nStartingHeight);
-		
-	 // Be more aggressive with blockchain download. Send new getblocks() message after connection 
-	 // to new node if waited longer than MAX_TIME_SINCE_BEST_BLOCK. 
-	 int64 TimeSinceBestBlock = GetTime() - nTimeBestReceived; 
-	 if (TimeSinceBestBlock > MAX_TIME_SINCE_BEST_BLOCK) { 
-	  	printf("INFO: Waiting %lld sec which is too long. Sending GetBlocks(0)\n", TimeSinceBestBlock); 
-		pfrom->PushGetBlocks(pindexBest, uint256(0)); 
-  	 } 
 
         // ask for pending sync-checkpoint if any
         if (!IsInitialBlockDownload())
@@ -3649,7 +3641,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             {
                 // When this block is requested, we'll send an inv that'll make them
                 // getblocks the next batch of inventory.
-                printf("  getblocks stopping at limit %d %s\n", pindex->nHeight, pindex->GetBlockHash().ToString().substr(0,20).c_str());
+                printf("getblocks stopping at limit %d %s\n", pindex->nHeight, pindex->GetBlockHash().ToString().substr(0,20).c_str());
                 pfrom->hashContinue = pindex->GetBlockHash();
                 break;
             }
@@ -3789,17 +3781,9 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         pfrom->AddInventoryKnown(inv);
 
         CValidationState state;
-        if (ProcessBlock(state, pfrom, &block)) { 
+        if (ProcessBlock(state, pfrom, &block))
             mapAlreadyAskedFor.erase(inv); 
-        } else { 
-        // Be more aggressive with blockchain download. Send getblocks() message after 
-        // an error related to new block download. 
-            int64 TimeSinceBestBlock = GetTime() - nTimeBestReceived; 
-        if (TimeSinceBestBlock > MAX_TIME_SINCE_BEST_BLOCK) { 
-		     printf("INFO: Waiting %lld sec which is too long. Sending GetBlocks(0)\n", TimeSinceBestBlock); 
-                pfrom->PushGetBlocks(pindexBest, uint256(0)); 
-            } 
-        } 
+
         int nDoS = 0;
         if (state.IsInvalid(nDoS))
             if (nDoS > 0)
@@ -3816,7 +3800,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             if(addr.nTime > nCutOff)
 			  pfrom->PushAddress(addr);
     }
-
 
     else if (strCommand == "mempool")
     {

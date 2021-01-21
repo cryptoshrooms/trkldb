@@ -65,8 +65,6 @@ static const unsigned int FORK_TIME2 = 1420748603; // Thursday, 08 Jan 2015 20:2
 static const unsigned int DRIFT_SWITCH_TIME = 1519884366; // Thursday, 1 March 2018 06:06:06 GMT
 static const unsigned int FIXED_REWARD_SWITCH_TIME = 1609459200; // Friday, 1 January 2021 00:00:00 GMT
 
-static const int MAX_TIME_SINCE_BEST_BLOCK = 10; // how many seconds to wait before sending next PushGetBlocks()
-
 static const int64 MIN_TXOUT_AMOUNT = MIN_TX_FEE;
 
 inline bool MoneyRange(int64 nValue) { return (nValue >= 0 && nValue <= MAX_MONEY); }
