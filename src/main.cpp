@@ -3316,8 +3316,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             pfrom->nVersion = 300;
         if (!vRecv.empty())
             vRecv >> addrFrom >> nNonce;
-        if (!vRecv.empty())
+        if (!vRecv.empty()) {
             vRecv >> pfrom->strSubVer;
+            pfrom->cleanSubVer = SanitizeString(pfrom->strSubVer);
+        }
         if (!vRecv.empty())
             vRecv >> pfrom->nStartingHeight;
 
@@ -3770,8 +3772,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         int nDoS = 0;
         if (state.IsInvalid(nDoS))
         {
-            printf("%s from %s %s was not accepted into the memory pool\n", tx.GetHash().ToString().c_str(), pfrom->addr.ToString().c_str());
-//            printf("%s from %s %s was not accepted into the memory pool\n", tx.GetHash().ToString().c_str(), pfrom->addr.ToString().c_str(), pfrom->cleanSubVer.c_str());
+            printf("%s from %s %s was not accepted into the memory pool\n", tx.GetHash().ToString().c_str(), pfrom->addr.ToString().c_str(), pfrom->cleanSubVer.c_str());
             if (nDoS > 0)
                 pfrom->Misbehaving(nDoS);
         }
