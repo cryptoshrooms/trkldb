@@ -20,6 +20,7 @@
 #include "protocol.h"
 #include "addrman.h"
 #include "hash.h"
+#include "bloom.h"
 
 class CRequestTracker;
 class CNode;
@@ -221,6 +222,8 @@ public:
     bool fSuccessfullyConnected;
     bool fDisconnect;
     CSemaphoreGrant grantOutbound;
+    CCriticalSection cs_filter;
+    CBloomFilter* pfilter;
 protected:
     int nRefCount;
 
@@ -286,6 +289,7 @@ public:
         nMisbehavior = 0;
         hashCheckpointKnown = 0;
         setInventoryKnown.max_size(SendBufferSize() / 1000);
+        pfilter = NULL;
 
         // Be shy and don't send version until we hear
 		// Don't announce non-peer CNodes
@@ -300,6 +304,8 @@ public:
             closesocket(hSocket);
             hSocket = INVALID_SOCKET;
         }
+        if (pfilter)
+            delete pfilter;
     }
 
 private:
