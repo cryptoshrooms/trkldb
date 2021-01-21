@@ -7,6 +7,7 @@
 #include "protocol.h"
 #include "util.h"
 #include "netbase.h"
+#include "main.h"
 
 #ifndef WIN32
 # include <arpa/inet.h>
@@ -17,6 +18,7 @@ static const char* ppszTypeName[] =
     "ERROR",
     "tx",
     "block",
+    "filtered block",
 };
 
 CMessageHeader::CMessageHeader()
