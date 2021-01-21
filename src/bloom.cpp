@@ -1,5 +1,4 @@
 // Copyright (c) 2012 The Bitcoin developers
-// Copyright (c) 2013-2019 The Truckcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #include <math.h>
@@ -16,7 +15,7 @@ using namespace std;
 
 static const unsigned char bit_mask[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
 
-CBloomFilter::CBloomFilter(unsigned int nElements, double nFPRate, unsigned int nTweakIn, unsigned char nFlagsIn) :
+CBloomFilter::CBloomFilter(unsigned int nElements, double nFPRate) :
 // The ideal size for a bloom filter with a given number of elements and false positive rate is:
 // - nElements * log(fp rate) / ln(2)^2
 // We ignore filter parameters which will create a bloom filter larger than the protocol limits
@@ -24,31 +23,24 @@ vData(min((unsigned int)(-1  / LN2SQUARED * nElements * log(nFPRate)), MAX_BLOOM
 // The ideal number of hash functions is filter size * ln(2) / number of elements
 // Again, we ignore filter parameters which will create a bloom filter with more hash functions than the protocol limits
 // See http://en.wikipedia.org/wiki/Bloom_filter for an explanation of these formulas
-isFull(false),
-isEmpty(false),
-nHashFuncs(min((unsigned int)(vData.size() * 8 / nElements * LN2), MAX_HASH_FUNCS)),
-nTweak(nTweakIn),
-nFlags(nFlagsIn)
+nHashFuncs(min((unsigned int)(vData.size() * 8 / nElements * LN2), MAX_HASH_FUNCS))
 {
 }
 
 inline unsigned int CBloomFilter::Hash(unsigned int nHashNum, const std::vector<unsigned char>& vDataToHash) const
 {
     // 0xFBA4C795 chosen as it guarantees a reasonable bit difference between nHashNum values.
-    return MurmurHash3(nHashNum * 0xFBA4C795 + nTweak, vDataToHash) % (vData.size() * 8);
+    return MurmurHash3(nHashNum * 0xFBA4C795, vDataToHash) % (vData.size() * 8);
 }
 
 void CBloomFilter::insert(const vector<unsigned char>& vKey)
 {
-    if (isFull)
-        return;
     for (unsigned int i = 0; i < nHashFuncs; i++)
     {
         unsigned int nIndex = Hash(i, vKey);
         // Sets bit nIndex of vData
         vData[nIndex >> 3] |= bit_mask[7 & nIndex];
     }
-    isEmpty = false;
 }
 
 void CBloomFilter::insert(const COutPoint& outpoint)
@@ -67,10 +59,6 @@ void CBloomFilter::insert(const uint256& hash)
 
 bool CBloomFilter::contains(const vector<unsigned char>& vKey) const
 {
-    if (isFull)
-        return true;
-    if (isEmpty)
-        return false;
     for (unsigned int i = 0; i < nHashFuncs; i++)
     {
         unsigned int nIndex = Hash(i, vKey);
@@ -100,25 +88,16 @@ bool CBloomFilter::IsWithinSizeConstraints() const
     return vData.size() <= MAX_BLOOM_FILTER_SIZE && nHashFuncs <= MAX_HASH_FUNCS;
 }
 
-bool CBloomFilter::IsRelevantAndUpdate(const CTransaction& tx, const uint256& hash)
+bool CBloomFilter::IsTransactionRelevantToFilter(const CTransaction& tx) const
 {
-    bool fFound = false;
     // Match if the filter contains the hash of tx
     //  for finding tx when they appear in a block
-    if (isFull)
+    if (contains(tx.GetHash()))
         return true;
-    if (isEmpty)
-        return false;
-    if (contains(hash))
-        fFound = true;
 
-    for (unsigned int i = 0; i < tx.vout.size(); i++)
+    BOOST_FOREACH(const CTxOut& txout, tx.vout)
     {
-        const CTxOut& txout = tx.vout[i];
         // Match if the filter contains any arbitrary script data element in any scriptPubKey in tx
-        // If this matches, also add the specific output that was matched.
-        // This means clients don't have to update the filter themselves when a new relevant tx 
-        // is discovered in order to find spending transactions, which avoids round-tripping and race conditions.
         CScript::const_iterator pc = txout.scriptPubKey.begin();
         vector<unsigned char> data;
         while (pc < txout.scriptPubKey.end())
@@ -127,25 +106,9 @@ bool CBloomFilter::IsRelevantAndUpdate(const CTransaction& tx, const uint256& ha
             if (!txout.scriptPubKey.GetOp(pc, opcode, data))
                 break;
             if (data.size() != 0 && contains(data))
-            {
-                fFound = true;
-                if ((nFlags & BLOOM_UPDATE_MASK) == BLOOM_UPDATE_ALL)
-                    insert(COutPoint(hash, i));
-                else if ((nFlags & BLOOM_UPDATE_MASK) == BLOOM_UPDATE_P2PUBKEY_ONLY)
-                {
-                    txnouttype type;
-                    vector<vector<unsigned char> > vSolutions;
-                    if (Solver(txout.scriptPubKey, type, vSolutions) &&
-                            (type == TX_PUBKEY || type == TX_MULTISIG))
-                        insert(COutPoint(hash, i));
-                }
-                break;
-            }
+                return true;
         }
     }
-
-    if (fFound)
-        return true;
 
     BOOST_FOREACH(const CTxIn& txin, tx.vin)
     {
@@ -167,17 +130,4 @@ bool CBloomFilter::IsRelevantAndUpdate(const CTransaction& tx, const uint256& ha
     }
 
     return false;
-}
-
-void CBloomFilter::UpdateEmptyFull()
-{
-    bool full = true;
-    bool empty = true;
-    for (unsigned int i = 0; i < vData.size(); i++)
-    {
-        full &= vData[i] == 0xff;
-        empty &= vData[i] == 0;
-    }
-    isFull = full;
-    isEmpty = empty;
 }
