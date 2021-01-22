@@ -32,8 +32,13 @@ CMessageHeader::CMessageHeader()
 CMessageHeader::CMessageHeader(const char* pszCommand, unsigned int nMessageSizeIn)
 {
     memcpy(pchMessageStart, ::pchMessageStart, sizeof(pchMessageStart));
-    memset(pchCommand, 0, sizeof(pchCommand));
-    strncpy(pchCommand, pszCommand, COMMAND_SIZE);
+
+    // Copy the command name, zero-padding to COMMAND_SIZE bytes
+    size_t i = 0;
+    for (; i < COMMAND_SIZE && pszCommand[i] != 0; ++i) pchCommand[i] = pszCommand[i];
+    assert(pszCommand[i] == 0); // Assert that the command name passed in is not longer than COMMAND_SIZE
+    for (; i < COMMAND_SIZE; ++i) pchCommand[i] = 0;
+
     nMessageSize = nMessageSizeIn;
     nChecksum = 0;
 }
